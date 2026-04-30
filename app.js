@@ -495,36 +495,33 @@ function drawCharts(summary) {
 function drawNetChart(transactions) {
   const canvas = els.netChart;
   const ctx = canvas.getContext("2d");
-  const sorted = transactions
-    .slice()
-    .sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || "").localeCompare(b.createdAt || ""));
+  const series = buildCapitalSeries(transactions);
 
   setupCanvas(canvas, ctx);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  if (!sorted.length) {
+  if (!series.length) {
     els.netChartEmpty.style.display = "grid";
     return;
   }
   els.netChartEmpty.style.display = "none";
 
-  let cumulative = 0;
-  const points = sorted.map((tx) => {
-    cumulative += tx.kind === "income" ? tx.amount : -tx.amount;
-    return { date: tx.date, value: cumulative };
-  });
-
-  const values = points.map((point) => point.value);
-  const min = Math.min(0, ...values);
-  const max = Math.max(0, ...values);
+  const values = series.flatMap((point) => [point.net, point.income, point.expense]);
+  const rawMin = Math.min(0, ...series.map((point) => point.net));
+  const rawMax = Math.max(0, ...values);
+  const padding = Math.max((rawMax - rawMin) * 0.08, rawMax > 0 ? rawMax * 0.04 : 1);
+  const min = rawMin < 0 ? rawMin - padding : 0;
+  const max = rawMax + padding;
   drawGrid(ctx, canvas, min, max);
 
   const pad = chartPadding(canvas);
   const range = max - min || 1;
-  const xFor = (index) => pad.left + (index / Math.max(points.length - 1, 1)) * (canvas.width - pad.left - pad.right);
+  const xFor = (index) => pad.left + (index / Math.max(series.length - 1, 1)) * (canvas.width - pad.left - pad.right);
   const yFor = (value) => pad.top + ((max - value) / range) * (canvas.height - pad.top - pad.bottom);
 
   const zeroY = yFor(0);
+  drawCapitalArea(ctx, series, xFor, yFor, zeroY);
+
   ctx.strokeStyle = "#aebbb5";
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -532,26 +529,110 @@ function drawNetChart(transactions) {
   ctx.lineTo(canvas.width - pad.right, zeroY);
   ctx.stroke();
 
-  ctx.strokeStyle = cumulative >= 0 ? "#0f8a5f" : "#c64242";
-  ctx.lineWidth = 3;
+  drawSeriesLine(ctx, series, "expense", xFor, yFor, "#c64242", 2);
+  drawSeriesLine(ctx, series, "income", xFor, yFor, "#0f8a5f", 2);
+  drawSeriesLine(ctx, series, "net", xFor, yFor, "#7c3aed", 3);
+
+  const last = series[series.length - 1];
+  ctx.fillStyle = "#7c3aed";
+  ctx.beginPath();
+  ctx.arc(xFor(series.length - 1), yFor(last.net), 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawXAxisLabels(ctx, canvas, series);
+  drawChartLabel(ctx, canvas, `${formatMoney(last.net)}`, canvas.width - pad.right, yFor(last.net), "right");
+}
+
+function buildCapitalSeries(transactions) {
+  const validTransactions = transactions.filter((tx) => tx.date && Number(tx.amount) > 0);
+  if (!validTransactions.length) return [];
+
+  const totalsByDate = new Map();
+  validTransactions.forEach((tx) => {
+    const current = totalsByDate.get(tx.date) || { income: 0, expense: 0 };
+    if (tx.kind === "income") current.income += Number(tx.amount);
+    else current.expense += Number(tx.amount);
+    totalsByDate.set(tx.date, current);
+  });
+
+  const dates = [...totalsByDate.keys()].sort();
+  let cursor = shiftIsoDate(dates[0], -1);
+  const end = shiftIsoDate(dates[dates.length - 1], 1);
+  let net = 0;
+  const series = [];
+
+  while (cursor <= end) {
+    const totals = totalsByDate.get(cursor) || { income: 0, expense: 0 };
+    net += totals.income - totals.expense;
+    series.push({
+      date: cursor,
+      income: totals.income,
+      expense: totals.expense,
+      net,
+    });
+    cursor = shiftIsoDate(cursor, 1);
+  }
+
+  return series;
+}
+
+function drawCapitalArea(ctx, series, xFor, yFor, zeroY) {
+  ctx.fillStyle = "rgba(124, 58, 237, 0.14)";
+  ctx.beginPath();
+  ctx.moveTo(xFor(0), zeroY);
+  drawSmoothSeriesPath(ctx, series, "net", xFor, yFor, true);
+  ctx.lineTo(xFor(series.length - 1), zeroY);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawSeriesLine(ctx, series, key, xFor, yFor, color, width) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
   ctx.beginPath();
-  points.forEach((point, index) => {
-    const x = xFor(index);
-    const y = yFor(point.value);
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
+  drawSmoothSeriesPath(ctx, series, key, xFor, yFor);
   ctx.stroke();
+}
 
+function drawSmoothSeriesPath(ctx, series, key, xFor, yFor, connectFromCurrentPoint = false) {
+  if (!series.length) return;
+
+  const points = series.map((point, index) => ({
+    x: xFor(index),
+    y: yFor(point[key]),
+  }));
+
+  if (connectFromCurrentPoint) ctx.lineTo(points[0].x, points[0].y);
+  else ctx.moveTo(points[0].x, points[0].y);
+
+  if (points.length === 1) return;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const midX = (previous.x + current.x) / 2;
+    const midY = (previous.y + current.y) / 2;
+    ctx.quadraticCurveTo(previous.x, previous.y, midX, midY);
+  }
+
+  const penultimate = points[points.length - 2];
   const last = points[points.length - 1];
-  ctx.fillStyle = cumulative >= 0 ? "#0f8a5f" : "#c64242";
-  ctx.beginPath();
-  ctx.arc(xFor(points.length - 1), yFor(last.value), 5, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.quadraticCurveTo(penultimate.x, penultimate.y, last.x, last.y);
+}
 
-  drawChartLabel(ctx, canvas, `${formatMoney(cumulative)}`, canvas.width - pad.right, yFor(last.value), "right");
+function drawXAxisLabels(ctx, canvas, series) {
+  const pad = chartPadding(canvas);
+  const first = series[0];
+  const last = series[series.length - 1];
+  ctx.fillStyle = "#62706b";
+  ctx.font = "12px Inter, sans-serif";
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
+  ctx.fillText(formatShortDate(first.date), pad.left, canvas.height - 10);
+  ctx.textAlign = "right";
+  ctx.fillText(formatShortDate(last.date), canvas.width - pad.right, canvas.height - 10);
 }
 
 function drawMonthChart(transactions) {
@@ -1021,6 +1102,16 @@ function formatDate(value) {
   }).format(date);
 }
 
+function formatShortDate(value) {
+  if (!value) return "";
+  const date = parseLocalDate(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("es-ES", {
+    day: "2-digit",
+    month: "short",
+  }).format(date);
+}
+
 function getLastMonths(count) {
   const months = [];
   const date = new Date();
@@ -1037,6 +1128,26 @@ function getLastMonths(count) {
 
 function toMonthKey(dateString) {
   return String(dateString || "").slice(0, 7);
+}
+
+function shiftIsoDate(dateString, days) {
+  const date = parseLocalDate(dateString);
+  date.setDate(date.getDate() + days);
+  return dateToIsoDate(date);
+}
+
+function parseLocalDate(dateString) {
+  const [year, month, day] = String(dateString || "")
+    .split("-")
+    .map((value) => Number(value));
+  return new Date(year || 1970, (month || 1) - 1, day || 1);
+}
+
+function dateToIsoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function today() {

@@ -364,6 +364,46 @@ h2 {
   font-size: 13px;
 }
 
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fbfcfc;
+  color: #40504b;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.legend-dot.capital {
+  color: #7c3aed;
+}
+
+.legend-dot.income {
+  color: var(--green);
+}
+
+.legend-dot.expense {
+  color: var(--red);
+}
+
 .chart-panel {
   min-height: 340px;
 }
