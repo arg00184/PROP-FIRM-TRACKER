@@ -518,8 +518,10 @@ function drawNetChart(transactions) {
   const range = max - min || 1;
   const xFor = (index) => pad.left + (index / Math.max(series.length - 1, 1)) * (canvas.width - pad.left - pad.right);
   const yFor = (value) => pad.top + ((max - value) / range) * (canvas.height - pad.top - pad.bottom);
+  const dateTicks = getXAxisTicks(series, canvas);
 
   const zeroY = yFor(0);
+  drawDateGuides(ctx, canvas, dateTicks, xFor);
   drawCapitalArea(ctx, series, xFor, yFor, zeroY);
 
   ctx.strokeStyle = "#aebbb5";
@@ -539,7 +541,7 @@ function drawNetChart(transactions) {
   ctx.arc(xFor(series.length - 1), yFor(last.net), 5, 0, Math.PI * 2);
   ctx.fill();
 
-  drawXAxisLabels(ctx, canvas, series);
+  drawXAxisLabels(ctx, canvas, dateTicks, xFor);
   drawChartLabel(ctx, canvas, `${formatMoney(last.net)}`, canvas.width - pad.right, yFor(last.net), "right");
 }
 
@@ -622,17 +624,90 @@ function drawSmoothSeriesPath(ctx, series, key, xFor, yFor, connectFromCurrentPo
   ctx.quadraticCurveTo(penultimate.x, penultimate.y, last.x, last.y);
 }
 
-function drawXAxisLabels(ctx, canvas, series) {
+function drawDateGuides(ctx, canvas, ticks, xFor) {
   const pad = chartPadding(canvas);
-  const first = series[0];
-  const last = series[series.length - 1];
+  const top = pad.top;
+  const bottom = canvas.height - pad.bottom;
+  ctx.strokeStyle = "#eef2f0";
+  ctx.lineWidth = 1;
+
+  ticks.forEach((tick) => {
+    const x = xFor(tick.index);
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.stroke();
+  });
+}
+
+function drawXAxisLabels(ctx, canvas, ticks, xFor) {
+  const pad = chartPadding(canvas);
   ctx.fillStyle = "#62706b";
   ctx.font = "12px Inter, sans-serif";
   ctx.textBaseline = "alphabetic";
-  ctx.textAlign = "left";
-  ctx.fillText(formatShortDate(first.date), pad.left, canvas.height - 10);
-  ctx.textAlign = "right";
-  ctx.fillText(formatShortDate(last.date), canvas.width - pad.right, canvas.height - 10);
+
+  ticks.forEach((tick, tickIndex) => {
+    const x = xFor(tick.index);
+    const label = formatShortDate(tick.date);
+    if (tickIndex === 0) ctx.textAlign = "left";
+    else if (tickIndex === ticks.length - 1) ctx.textAlign = "right";
+    else ctx.textAlign = "center";
+    ctx.fillText(label, x, canvas.height - 10);
+  });
+}
+
+function getXAxisTicks(series, canvas) {
+  if (!series.length) return [];
+
+  const pad = chartPadding(canvas);
+  const innerWidth = canvas.width - pad.left - pad.right;
+  const maxLabels = Math.max(2, Math.floor(innerWidth / 105));
+  const totalDays = Math.max(1, series.length - 1);
+  const rawInterval = Math.ceil(totalDays / Math.max(maxLabels - 1, 1));
+  const interval = chooseDayInterval(rawInterval);
+  const ticks = [];
+
+  for (let index = 0; index < series.length; index += interval) {
+    ticks.push({ index, date: series[index].date });
+  }
+
+  const lastIndex = series.length - 1;
+  if (ticks[ticks.length - 1]?.index !== lastIndex) {
+    ticks.push({ index: lastIndex, date: series[lastIndex].date });
+  }
+
+  return preventCrowdedDateTicks(ticks, xForTick(series, canvas), 70);
+}
+
+function chooseDayInterval(rawInterval) {
+  const intervals = [1, 2, 3, 5, 7, 10, 14, 15, 30, 45, 60, 90, 180, 365];
+  return intervals.find((interval) => interval >= rawInterval) || rawInterval;
+}
+
+function preventCrowdedDateTicks(ticks, xFor, minDistance) {
+  if (ticks.length <= 2) return ticks;
+
+  const filtered = [ticks[0]];
+  for (let index = 1; index < ticks.length - 1; index += 1) {
+    const previous = filtered[filtered.length - 1];
+    const current = ticks[index];
+    if (xFor(current.index) - xFor(previous.index) >= minDistance) {
+      filtered.push(current);
+    }
+  }
+
+  const last = ticks[ticks.length - 1];
+  const previous = filtered[filtered.length - 1];
+  if (xFor(last.index) - xFor(previous.index) < minDistance && filtered.length > 1) {
+    filtered.pop();
+  }
+  filtered.push(last);
+  return filtered;
+}
+
+function xForTick(series, canvas) {
+  const pad = chartPadding(canvas);
+  return (index) => pad.left + (index / Math.max(series.length - 1, 1)) * (canvas.width - pad.left - pad.right);
 }
 
 function drawMonthChart(transactions) {
