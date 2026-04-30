@@ -1,4 +1,5 @@
 const STORAGE_KEY = "prop-firm-tracker:v1";
+const THEME_STORAGE_KEY = "prop-firm-tracker:theme";
 const EURO = "EUR";
 
 const categoryLabels = {
@@ -35,10 +36,13 @@ let confirmHandler = null;
 
 const els = {};
 
+applyTheme(getInitialTheme());
+
 document.addEventListener("DOMContentLoaded", () => {
   bindElements();
   setCurrentDate();
   bindEvents();
+  updateThemeToggle();
   refreshAll();
 });
 
@@ -110,6 +114,7 @@ function bindElements() {
     "confirmAcceptButton",
     "importFileInput",
     "toast",
+    "themeToggleButton",
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
@@ -126,6 +131,7 @@ function bindEvents() {
   document.getElementById("addAccountButtonInline").addEventListener("click", () => openAccountDialog());
   document.getElementById("addTransactionButton").addEventListener("click", () => openTransactionDialog());
   document.getElementById("addTransactionButtonInline").addEventListener("click", () => openTransactionDialog());
+  els.themeToggleButton.addEventListener("click", toggleTheme);
 
   document.querySelectorAll("[data-close-dialog]").forEach((button) => {
     button.addEventListener("click", () => closeDialog(button.dataset.closeDialog));
@@ -185,6 +191,34 @@ function bindEvents() {
   }, 120));
 }
 
+function getInitialTheme() {
+  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  if (stored === "light" || stored === "dark") return stored;
+  return "light";
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+}
+
+function toggleTheme() {
+  const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+  applyTheme(nextTheme);
+  updateThemeToggle();
+  drawCharts(getSummary());
+}
+
+function updateThemeToggle() {
+  if (!els.themeToggleButton) return;
+  const isDark = document.documentElement.dataset.theme === "dark";
+  els.themeToggleButton.innerHTML = `<i data-lucide="${isDark ? "sun" : "moon"}"></i>`;
+  els.themeToggleButton.setAttribute("aria-label", isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro");
+  els.themeToggleButton.title = isDark ? "Modo claro" : "Modo oscuro";
+  refreshIcons();
+}
+
 function setCurrentDate() {
   const formatter = new Intl.DateTimeFormat("es-ES", {
     weekday: "long",
@@ -228,6 +262,26 @@ function refreshIcons() {
   if (window.lucide) {
     window.lucide.createIcons();
   }
+}
+
+function themeColor(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function chartPalette() {
+  return {
+    axis: themeColor("--chart-axis"),
+    grid: themeColor("--chart-grid"),
+    guide: themeColor("--chart-guide"),
+    labelBg: themeColor("--chart-label-bg"),
+    labelBorder: themeColor("--chart-label-border"),
+    labelText: themeColor("--chart-label-text"),
+    muted: themeColor("--muted"),
+    capital: themeColor("--capital"),
+    capitalFill: themeColor("--capital-fill"),
+    green: themeColor("--green"),
+    red: themeColor("--red"),
+  };
 }
 
 function setActiveSection(section) {
@@ -496,6 +550,7 @@ function drawNetChart(transactions) {
   const canvas = els.netChart;
   const ctx = canvas.getContext("2d");
   const series = buildCapitalSeries(transactions);
+  const palette = chartPalette();
 
   setupCanvas(canvas, ctx);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -521,27 +576,27 @@ function drawNetChart(transactions) {
   const dateTicks = getXAxisTicks(series, canvas);
 
   const zeroY = yFor(0);
-  drawDateGuides(ctx, canvas, dateTicks, xFor);
-  drawCapitalArea(ctx, series, xFor, yFor, zeroY);
+  drawDateGuides(ctx, canvas, dateTicks, xFor, palette);
+  drawCapitalArea(ctx, series, xFor, yFor, zeroY, palette);
 
-  ctx.strokeStyle = "#aebbb5";
+  ctx.strokeStyle = palette.axis;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(pad.left, zeroY);
   ctx.lineTo(canvas.width - pad.right, zeroY);
   ctx.stroke();
 
-  drawSeriesLine(ctx, series, "expense", xFor, yFor, "#c64242", 2);
-  drawSeriesLine(ctx, series, "income", xFor, yFor, "#0f8a5f", 2);
-  drawSeriesLine(ctx, series, "net", xFor, yFor, "#7c3aed", 3);
+  drawSeriesLine(ctx, series, "expense", xFor, yFor, palette.red, 2);
+  drawSeriesLine(ctx, series, "income", xFor, yFor, palette.green, 2);
+  drawSeriesLine(ctx, series, "net", xFor, yFor, palette.capital, 3);
 
   const last = series[series.length - 1];
-  ctx.fillStyle = "#7c3aed";
+  ctx.fillStyle = palette.capital;
   ctx.beginPath();
   ctx.arc(xFor(series.length - 1), yFor(last.net), 5, 0, Math.PI * 2);
   ctx.fill();
 
-  drawXAxisLabels(ctx, canvas, dateTicks, xFor);
+  drawXAxisLabels(ctx, canvas, dateTicks, xFor, palette);
   drawChartLabel(ctx, canvas, `${formatMoney(last.net)}`, canvas.width - pad.right, yFor(last.net), "right");
 }
 
@@ -578,8 +633,8 @@ function buildCapitalSeries(transactions) {
   return series;
 }
 
-function drawCapitalArea(ctx, series, xFor, yFor, zeroY) {
-  ctx.fillStyle = "rgba(124, 58, 237, 0.14)";
+function drawCapitalArea(ctx, series, xFor, yFor, zeroY, palette) {
+  ctx.fillStyle = palette.capitalFill;
   ctx.beginPath();
   ctx.moveTo(xFor(0), zeroY);
   drawSmoothSeriesPath(ctx, series, "net", xFor, yFor, true);
@@ -624,11 +679,11 @@ function drawSmoothSeriesPath(ctx, series, key, xFor, yFor, connectFromCurrentPo
   ctx.quadraticCurveTo(penultimate.x, penultimate.y, last.x, last.y);
 }
 
-function drawDateGuides(ctx, canvas, ticks, xFor) {
+function drawDateGuides(ctx, canvas, ticks, xFor, palette) {
   const pad = chartPadding(canvas);
   const top = pad.top;
   const bottom = canvas.height - pad.bottom;
-  ctx.strokeStyle = "#eef2f0";
+  ctx.strokeStyle = palette.guide;
   ctx.lineWidth = 1;
 
   ticks.forEach((tick) => {
@@ -640,9 +695,9 @@ function drawDateGuides(ctx, canvas, ticks, xFor) {
   });
 }
 
-function drawXAxisLabels(ctx, canvas, ticks, xFor) {
+function drawXAxisLabels(ctx, canvas, ticks, xFor, palette) {
   const pad = chartPadding(canvas);
-  ctx.fillStyle = "#62706b";
+  ctx.fillStyle = palette.muted;
   ctx.font = "12px Inter, sans-serif";
   ctx.textBaseline = "alphabetic";
 
@@ -713,6 +768,7 @@ function xForTick(series, canvas) {
 function drawMonthChart(transactions) {
   const canvas = els.monthChart;
   const ctx = canvas.getContext("2d");
+  const palette = chartPalette();
   setupCanvas(canvas, ctx);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -744,15 +800,15 @@ function drawMonthChart(transactions) {
     const incomeHeight = (item.income / max) * innerHeight;
     const baseline = pad.top + innerHeight;
 
-    ctx.fillStyle = "#c64242";
+    ctx.fillStyle = palette.red;
     roundRect(ctx, center - barWidth - 2, baseline - expenseHeight, barWidth, expenseHeight, 4);
     ctx.fill();
 
-    ctx.fillStyle = "#0f8a5f";
+    ctx.fillStyle = palette.green;
     roundRect(ctx, center + 2, baseline - incomeHeight, barWidth, incomeHeight, 4);
     ctx.fill();
 
-    ctx.fillStyle = "#62706b";
+    ctx.fillStyle = palette.muted;
     ctx.font = "12px Inter, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(item.label, center, canvas.height - 10);
@@ -779,9 +835,10 @@ function chartPadding(canvas) {
 }
 
 function drawGrid(ctx, canvas, min, max) {
+  const palette = chartPalette();
   const pad = chartPadding(canvas);
   const lines = 4;
-  ctx.strokeStyle = "#e2e8e5";
+  ctx.strokeStyle = palette.grid;
   ctx.lineWidth = 1;
   for (let i = 0; i <= lines; i += 1) {
     const y = pad.top + (i / lines) * (canvas.height - pad.top - pad.bottom);
@@ -791,7 +848,7 @@ function drawGrid(ctx, canvas, min, max) {
     ctx.stroke();
   }
 
-  ctx.fillStyle = "#62706b";
+  ctx.fillStyle = palette.muted;
   ctx.font = "12px Inter, sans-serif";
   ctx.textAlign = "left";
   ctx.fillText(formatMoney(max), pad.left, pad.top + 2);
@@ -799,17 +856,18 @@ function drawGrid(ctx, canvas, min, max) {
 }
 
 function drawChartLabel(ctx, canvas, label, x, y, align = "left") {
+  const palette = chartPalette();
   ctx.font = "12px Inter, sans-serif";
   const width = ctx.measureText(label).width + 14;
   const height = 26;
   const left = align === "right" ? x - width : x;
   const top = Math.max(8, Math.min(canvas.height - height - 8, y - height - 8));
-  ctx.fillStyle = "#ffffff";
-  ctx.strokeStyle = "#d9e0dd";
+  ctx.fillStyle = palette.labelBg;
+  ctx.strokeStyle = palette.labelBorder;
   roundRect(ctx, left, top, width, height, 6);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = "#15201d";
+  ctx.fillStyle = palette.labelText;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(label, left + width / 2, top + height / 2 + 1);
