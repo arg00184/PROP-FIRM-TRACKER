@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Prop Firm Tracker</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://unpkg.com/lucide@latest" defer></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">PF</div>
+          <div>
+            <p class="brand-name">Prop Firm Tracker</p>
+            <p class="brand-meta">Compras y retiros</p>
+          </div>
+        </div>
+
+        <nav class="nav-list" aria-label="Navegacion principal">
+          <button class="nav-item active" data-section="overview">
+            <i data-lucide="layout-dashboard"></i>
+            <span>Panel</span>
+          </button>
+          <button class="nav-item" data-section="firms">
+            <i data-lucide="building-2"></i>
+            <span>Firms</span>
+          </button>
+          <button class="nav-item" data-section="accounts">
+            <i data-lucide="wallet-cards"></i>
+            <span>Cuentas</span>
+          </button>
+          <button class="nav-item" data-section="transactions">
+            <i data-lucide="receipt-text"></i>
+            <span>Movimientos</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-actions">
+          <button class="ghost-button" id="exportJsonButton">
+            <i data-lucide="download"></i>
+            <span>JSON</span>
+          </button>
+          <button class="ghost-button" id="exportCsvButton">
+            <i data-lucide="file-down"></i>
+            <span>CSV</span>
+          </button>
+          <button class="ghost-button" id="importJsonButton">
+            <i data-lucide="upload"></i>
+            <span>Importar</span>
+          </button>
+          <input id="importFileInput" type="file" accept="application/json" hidden />
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="currentDateLabel"></p>
+            <h1 id="pageTitle">Panel</h1>
+          </div>
+          <div class="topbar-actions">
+            <button class="secondary-button" id="addFirmButton">
+              <i data-lucide="building-2"></i>
+              <span>Firm</span>
+            </button>
+            <button class="secondary-button" id="addAccountButton">
+              <i data-lucide="wallet-cards"></i>
+              <span>Cuenta</span>
+            </button>
+            <button class="primary-button" id="addTransactionButton">
+              <i data-lucide="plus"></i>
+              <span>Movimiento</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="section-panel active" id="overviewSection">
+          <div class="metrics-grid">
+            <article class="metric-card metric-net">
+              <span>Resultado neto</span>
+              <strong id="metricNet">0,00 EUR</strong>
+              <small id="metricNetHint">Sin movimientos</small>
+            </article>
+            <article class="metric-card">
+              <span>Total gastado</span>
+              <strong id="metricExpenses">0,00 EUR</strong>
+              <small>Compras, resets, activaciones y fees</small>
+            </article>
+            <article class="metric-card">
+              <span>Retiros cobrados</span>
+              <strong id="metricIncome">0,00 EUR</strong>
+              <small>Payouts, refunds y otros ingresos</small>
+            </article>
+            <article class="metric-card">
+              <span>ROI</span>
+              <strong id="metricRoi">0,00%</strong>
+              <small id="metricRoiHint">Base: gasto total</small>
+            </article>
+            <article class="metric-card">
+              <span>Break-even pendiente</span>
+              <strong id="metricBreakEven">0,00 EUR</strong>
+              <small>Retiros necesarios para empatar</small>
+            </article>
+            <article class="metric-card">
+              <span>Cuentas activas</span>
+              <strong id="metricActiveAccounts">0</strong>
+              <small id="metricAccountHint">0 cuentas registradas</small>
+            </article>
+          </div>
+
+          <div class="dashboard-grid">
+            <article class="panel chart-panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Evolucion neta</h2>
+                  <p>Resultado acumulado</p>
+                </div>
+              </div>
+              <div class="canvas-wrap">
+                <canvas id="netChart" height="260"></canvas>
+                <p class="empty-chart" id="netChartEmpty">Sin datos</p>
+              </div>
+            </article>
+
+            <article class="panel chart-panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Mes actual</h2>
+                  <p>Gastos, retiros y neto</p>
+                </div>
+              </div>
+              <div class="month-summary">
+                <div>
+                  <span>Gasto</span>
+                  <strong id="monthExpenses">0,00 EUR</strong>
+                </div>
+                <div>
+                  <span>Retiros</span>
+                  <strong id="monthIncome">0,00 EUR</strong>
+                </div>
+                <div>
+                  <span>Neto</span>
+                  <strong id="monthNet">0,00 EUR</strong>
+                </div>
+              </div>
+              <div class="canvas-wrap compact">
+                <canvas id="monthChart" height="170"></canvas>
+                <p class="empty-chart" id="monthChartEmpty">Sin datos</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="section-panel" id="firmsSection">
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Resultado por firm</h2>
+                <p>Gastos y retiros agrupados</p>
+              </div>
+              <button class="secondary-button compact-button" id="addFirmButtonInline">
+                <i data-lucide="plus"></i>
+                <span>Firm</span>
+              </button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Firm</th>
+                    <th>Tipo</th>
+                    <th>Cuentas</th>
+                    <th>Gastado</th>
+                    <th>Retirado</th>
+                    <th>Neto</th>
+                    <th>ROI</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="firmsTableBody"></tbody>
+              </table>
+            </div>
+            <p class="empty-state" id="firmsEmpty">No hay firms registradas.</p>
+          </div>
+        </section>
+
+        <section class="section-panel" id="accountsSection">
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Cuentas</h2>
+                <p>Coste, retiros y estado</p>
+              </div>
+              <button class="secondary-button compact-button" id="addAccountButtonInline">
+                <i data-lucide="plus"></i>
+                <span>Cuenta</span>
+              </button>
+            </div>
+            <div class="filters-row">
+              <label>
+                Firm
+                <select id="accountFirmFilter"></select>
+              </label>
+              <label>
+                Estado
+                <select id="accountStatusFilter">
+                  <option value="all">Todos</option>
+                  <option value="active">Activa</option>
+                  <option value="passed">Pasada</option>
+                  <option value="funded">Fondeada</option>
+                  <option value="failed">Fallada</option>
+                  <option value="closed">Cerrada</option>
+                </select>
+              </label>
+              <label>
+                Buscar
+                <input id="accountSearch" type="search" placeholder="Nombre, tamano..." />
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Cuenta</th>
+                    <th>Firm</th>
+                    <th>Tamano</th>
+                    <th>Estado</th>
+                    <th>Comprada</th>
+                    <th>Gastado</th>
+                    <th>Retirado</th>
+                    <th>Neto</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="accountsTableBody"></tbody>
+              </table>
+            </div>
+            <p class="empty-state" id="accountsEmpty">No hay cuentas registradas.</p>
+          </div>
+        </section>
+
+        <section class="section-panel" id="transactionsSection">
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Movimientos</h2>
+                <p>Compras, resets, fees, payouts y refunds</p>
+              </div>
+              <button class="primary-button compact-button" id="addTransactionButtonInline">
+                <i data-lucide="plus"></i>
+                <span>Movimiento</span>
+              </button>
+            </div>
+            <div class="filters-row">
+              <label>
+                Firm
+                <select id="transactionFirmFilter"></select>
+              </label>
+              <label>
+                Tipo
+                <select id="transactionKindFilter">
+                  <option value="all">Todos</option>
+                  <option value="expense">Gastos</option>
+                  <option value="income">Retiros</option>
+                </select>
+              </label>
+              <label>
+                Desde
+                <input id="transactionFromFilter" type="date" />
+              </label>
+              <label>
+                Hasta
+                <input id="transactionToFilter" type="date" />
+              </label>
+              <label>
+                Buscar
+                <input id="transactionSearch" type="search" placeholder="Categoria, nota..." />
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Tipo</th>
+                    <th>Categoria</th>
+                    <th>Firm</th>
+                    <th>Cuenta</th>
+                    <th>Nota</th>
+                    <th>Importe</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="transactionsTableBody"></tbody>
+              </table>
+            </div>
+            <p class="empty-state" id="transactionsEmpty">No hay movimientos registrados.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog class="modal" id="firmDialog">
+      <form method="dialog" id="firmForm" class="modal-card">
+        <div class="modal-header">
+          <h2 id="firmDialogTitle">Nueva firm</h2>
+          <button class="icon-button" type="button" data-close-dialog="firmDialog" aria-label="Cerrar">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <input type="hidden" id="firmId" />
+        <label>
+          Nombre
+          <input id="firmName" type="text" required placeholder="Apex, Topstep, FTMO..." />
+        </label>
+        <label>
+          Tipo
+          <select id="firmType" required>
+            <option value="Futuros">Futuros</option>
+            <option value="CFDs">CFDs</option>
+            <option value="Mixta">Mixta</option>
+          </select>
+        </label>
+        <label>
+          Notas
+          <textarea id="firmNotes" rows="3" placeholder="Reglas o detalles importantes"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button class="ghost-button" type="button" data-close-dialog="firmDialog">Cancelar</button>
+          <button class="primary-button" type="submit">Guardar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="accountDialog">
+      <form method="dialog" id="accountForm" class="modal-card">
+        <div class="modal-header">
+          <h2 id="accountDialogTitle">Nueva cuenta</h2>
+          <button class="icon-button" type="button" data-close-dialog="accountDialog" aria-label="Cerrar">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <input type="hidden" id="accountId" />
+        <div class="form-grid">
+          <label>
+            Firm
+            <select id="accountFirm" required></select>
+          </label>
+          <label>
+            Estado
+            <select id="accountStatus" required>
+              <option value="active">Activa</option>
+              <option value="passed">Pasada</option>
+              <option value="funded">Fondeada</option>
+              <option value="failed">Fallada</option>
+              <option value="closed">Cerrada</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          Nombre
+          <input id="accountName" type="text" required placeholder="50K Apex PA, FTMO 100K..." />
+        </label>
+        <div class="form-grid">
+          <label>
+            Tamano
+            <input id="accountSize" type="text" placeholder="50K, 100K, 200K..." />
+          </label>
+          <label>
+            Fecha de compra
+            <input id="accountPurchasedAt" type="date" />
+          </label>
+        </div>
+        <label>
+          Notas
+          <textarea id="accountNotes" rows="3" placeholder="Objetivo, drawdown, payout rules..."></textarea>
+        </label>
+        <div class="modal-actions">
+          <button class="ghost-button" type="button" data-close-dialog="accountDialog">Cancelar</button>
+          <button class="primary-button" type="submit">Guardar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="transactionDialog">
+      <form method="dialog" id="transactionForm" class="modal-card">
+        <div class="modal-header">
+          <h2 id="transactionDialogTitle">Nuevo movimiento</h2>
+          <button class="icon-button" type="button" data-close-dialog="transactionDialog" aria-label="Cerrar">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <input type="hidden" id="transactionId" />
+        <div class="form-grid">
+          <label>
+            Fecha
+            <input id="transactionDate" type="date" required />
+          </label>
+          <label>
+            Tipo
+            <select id="transactionKind" required>
+              <option value="expense">Gasto</option>
+              <option value="income">Retiro / ingreso</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-grid">
+          <label>
+            Categoria
+            <select id="transactionCategory" required></select>
+          </label>
+          <label>
+            Importe
+            <input id="transactionAmount" type="number" min="0" step="0.01" required placeholder="0.00" />
+          </label>
+        </div>
+        <div class="form-grid">
+          <label>
+            Firm
+            <select id="transactionFirm" required></select>
+          </label>
+          <label>
+            Cuenta
+            <select id="transactionAccount"></select>
+          </label>
+        </div>
+        <label>
+          Nota
+          <textarea id="transactionNote" rows="3" placeholder="Detalle del pago o retiro"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button class="ghost-button" type="button" data-close-dialog="transactionDialog">Cancelar</button>
+          <button class="primary-button" type="submit">Guardar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="confirmDialog">
+      <form method="dialog" class="modal-card small-card">
+        <div class="modal-header">
+          <h2 id="confirmTitle">Confirmar</h2>
+          <button class="icon-button" type="button" data-close-dialog="confirmDialog" aria-label="Cerrar">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <p id="confirmMessage"></p>
+        <div class="modal-actions">
+          <button class="ghost-button" type="button" data-close-dialog="confirmDialog">Cancelar</button>
+          <button class="danger-button" id="confirmAcceptButton" type="button">Eliminar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
