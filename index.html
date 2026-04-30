@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Prop Firm Tracker</title>
+    <link rel="icon" href="./assets/logo.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://unpkg.com/lucide@latest" defer></script>
     <script src="./app.js" defer></script>
@@ -12,7 +13,9 @@
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark">PF</div>
+          <div class="brand-mark">
+            <img src="./assets/logo.svg" alt="Prop Firm Tracker" />
+          </div>
           <div>
             <p class="brand-name">Prop Firm Tracker</p>
             <p class="brand-meta">Compras y retiros</p>
@@ -41,15 +44,15 @@
         <div class="sidebar-actions">
           <button class="ghost-button" id="exportJsonButton">
             <i data-lucide="download"></i>
-            <span>JSON</span>
+            <span>Backup JSON</span>
           </button>
           <button class="ghost-button" id="exportCsvButton">
             <i data-lucide="file-down"></i>
-            <span>CSV</span>
+            <span>Exportar CSV</span>
           </button>
           <button class="ghost-button" id="importJsonButton">
             <i data-lucide="upload"></i>
-            <span>Importar</span>
+            <span>Importar JSON</span>
           </button>
           <input id="importFileInput" type="file" accept="application/json" hidden />
         </div>
@@ -64,15 +67,15 @@
           <div class="topbar-actions">
             <button class="secondary-button" id="addFirmButton">
               <i data-lucide="building-2"></i>
-              <span>Firm</span>
+              <span>Nueva firm</span>
             </button>
             <button class="secondary-button" id="addAccountButton">
               <i data-lucide="wallet-cards"></i>
-              <span>Cuenta</span>
+              <span>Nueva cuenta</span>
             </button>
             <button class="primary-button" id="addTransactionButton">
               <i data-lucide="plus"></i>
-              <span>Movimiento</span>
+              <span>Nuevo movimiento</span>
             </button>
           </div>
         </header>
@@ -80,32 +83,50 @@
         <section class="section-panel active" id="overviewSection">
           <div class="metrics-grid">
             <article class="metric-card metric-net">
-              <span>Resultado neto</span>
+              <div class="metric-heading">
+                <span>Neto total</span>
+                <i data-lucide="activity"></i>
+              </div>
               <strong id="metricNet">0,00 EUR</strong>
               <small id="metricNetHint">Sin movimientos</small>
             </article>
             <article class="metric-card">
-              <span>Total gastado</span>
+              <div class="metric-heading">
+                <span>Gasto total</span>
+                <i data-lucide="arrow-down-left"></i>
+              </div>
               <strong id="metricExpenses">0,00 EUR</strong>
               <small>Compras, resets, activaciones y fees</small>
             </article>
             <article class="metric-card">
-              <span>Retiros cobrados</span>
+              <div class="metric-heading">
+                <span>Retiros</span>
+                <i data-lucide="arrow-up-right"></i>
+              </div>
               <strong id="metricIncome">0,00 EUR</strong>
               <small>Payouts, refunds y otros ingresos</small>
             </article>
             <article class="metric-card">
-              <span>ROI</span>
+              <div class="metric-heading">
+                <span>ROI</span>
+                <i data-lucide="percent"></i>
+              </div>
               <strong id="metricRoi">0,00%</strong>
               <small id="metricRoiHint">Base: gasto total</small>
             </article>
             <article class="metric-card">
-              <span>Break-even pendiente</span>
+              <div class="metric-heading">
+                <span>Break-even</span>
+                <i data-lucide="target"></i>
+              </div>
               <strong id="metricBreakEven">0,00 EUR</strong>
               <small>Retiros necesarios para empatar</small>
             </article>
             <article class="metric-card">
-              <span>Cuentas activas</span>
+              <div class="metric-heading">
+                <span>Activas</span>
+                <i data-lucide="circle-check-big"></i>
+              </div>
               <strong id="metricActiveAccounts">0</strong>
               <small id="metricAccountHint">0 cuentas registradas</small>
             </article>
@@ -168,7 +189,7 @@
               </div>
               <button class="secondary-button compact-button" id="addFirmButtonInline">
                 <i data-lucide="plus"></i>
-                <span>Firm</span>
+                <span>Nueva firm</span>
               </button>
             </div>
             <div class="table-wrap">
@@ -201,7 +222,7 @@
               </div>
               <button class="secondary-button compact-button" id="addAccountButtonInline">
                 <i data-lucide="plus"></i>
-                <span>Cuenta</span>
+                <span>Nueva cuenta</span>
               </button>
             </div>
             <div class="filters-row">
@@ -256,7 +277,7 @@
               </div>
               <button class="primary-button compact-button" id="addTransactionButtonInline">
                 <i data-lucide="plus"></i>
-                <span>Movimiento</span>
+                <span>Nuevo movimiento</span>
               </button>
             </div>
             <div class="filters-row">
