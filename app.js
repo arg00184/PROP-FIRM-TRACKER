@@ -646,7 +646,12 @@ function buildCapitalSeries(transactions) {
 }
 
 function drawCapitalArea(ctx, series, xFor, yFor, zeroY, palette) {
-  ctx.fillStyle = palette.capitalFill;
+  // Vertical gradient: stronger near the line, fading to transparent at zero
+  const topY = Math.min(...series.map((p, i) => yFor(p.net)));
+  const gradient = ctx.createLinearGradient(0, topY, 0, zeroY);
+  gradient.addColorStop(0, palette.capitalFill);
+  gradient.addColorStop(1, palette.capitalFillSoft || "rgba(124, 58, 237, 0)");
+  ctx.fillStyle = gradient;
   ctx.beginPath();
   ctx.moveTo(xFor(0), zeroY);
   drawSmoothSeriesPath(ctx, series, "net", xFor, yFor, true);
