@@ -43,6 +43,7 @@ let confirmHandler = null;
 let currentSession = null;
 let currentUser = null;
 let cloudLoading = false;
+let authMode = "login";
 const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const els = {};
@@ -64,6 +65,8 @@ function bindElements() {
     "authForm",
     "authEmail",
     "authPassword",
+    "authTitle",
+    "authIntro",
     "authLoginButton",
     "authSignupButton",
     "authMessage",
@@ -147,9 +150,9 @@ function bindElements() {
 function bindEvents() {
   els.authForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    signIn();
+    submitAuthForm();
   });
-  els.authSignupButton.addEventListener("click", signUp);
+  els.authSignupButton.addEventListener("click", toggleAuthMode);
   els.logoutButton.addEventListener("click", signOut);
 
   document.querySelectorAll(".nav-item").forEach((button) => {
@@ -255,6 +258,7 @@ async function handleSession(session) {
   setAppAccess(Boolean(currentUser));
 
   if (!currentUser) {
+    setAuthMode("login");
     state = loadState();
     refreshAll();
     return;
@@ -284,6 +288,31 @@ function getAuthCredentials() {
     email: els.authEmail.value.trim(),
     password: els.authPassword.value,
   };
+}
+
+function toggleAuthMode() {
+  setAuthMode(authMode === "login" ? "signup" : "login");
+}
+
+function setAuthMode(mode) {
+  authMode = mode;
+  const isSignup = authMode === "signup";
+  els.authTitle.textContent = isSignup ? "Crear cuenta" : "trazza";
+  els.authIntro.textContent = isSignup
+    ? "Crea tu acceso para guardar tus datos en la nube."
+    : "Accede para sincronizar tus firms, cuentas y movimientos.";
+  els.authLoginButton.textContent = isSignup ? "Crear cuenta" : "Entrar";
+  els.authSignupButton.textContent = isSignup ? "Ya tengo cuenta" : "Crear cuenta";
+  els.authPassword.autocomplete = isSignup ? "new-password" : "current-password";
+  els.authMessage.textContent = "";
+}
+
+function submitAuthForm() {
+  if (authMode === "signup") {
+    signUp();
+    return;
+  }
+  signIn();
 }
 
 async function signIn() {
@@ -537,6 +566,7 @@ function chartPalette() {
     muted: themeColor("--muted"),
     capital: themeColor("--capital"),
     capitalFill: themeColor("--capital-fill"),
+    capitalFillSoft: themeColor("--capital-fill-soft"),
     green: themeColor("--green"),
     red: themeColor("--red"),
   };
@@ -892,7 +922,11 @@ function buildCapitalSeries(transactions) {
 }
 
 function drawCapitalArea(ctx, series, xFor, yFor, zeroY, palette) {
-  ctx.fillStyle = palette.capitalFill;
+  const topY = Math.min(...series.map((point) => yFor(point.net)));
+  const gradient = ctx.createLinearGradient(0, topY, 0, zeroY);
+  gradient.addColorStop(0, palette.capitalFill);
+  gradient.addColorStop(1, palette.capitalFillSoft || "rgba(124, 58, 237, 0)");
+  ctx.fillStyle = gradient;
   ctx.beginPath();
   ctx.moveTo(xFor(0), zeroY);
   drawSmoothSeriesPath(ctx, series, "net", xFor, yFor, true);

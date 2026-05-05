@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>trazza</title>
     <link rel="icon" href="./assets/trazza.png" type="image/png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" />
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://unpkg.com/lucide@latest" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
@@ -15,8 +18,8 @@
       <form class="auth-card" id="authForm">
         <img src="./assets/trazza.png" alt="trazza" />
         <div>
-          <h1>trazza</h1>
-          <p>Accede para sincronizar tus firms, cuentas y movimientos.</p>
+          <h1 id="authTitle">trazza</h1>
+          <p id="authIntro">Accede para sincronizar tus firms, cuentas y movimientos.</p>
         </div>
         <label>
           Email
@@ -43,10 +46,12 @@
         </div>
 
         <nav class="nav-list" aria-label="Navegacion principal">
+          <p class="nav-label">General</p>
           <button class="nav-item active" data-section="overview">
             <i data-lucide="layout-dashboard"></i>
             <span>Panel</span>
           </button>
+          <p class="nav-label">Operativa</p>
           <button class="nav-item" data-section="firms">
             <i data-lucide="building-2"></i>
             <span>Firms</span>
@@ -120,7 +125,7 @@
             <article class="metric-card metric-net">
               <div class="metric-heading">
                 <span>Neto total</span>
-                <i data-lucide="activity"></i>
+                <span class="metric-icon" data-tone="accent"><i data-lucide="activity"></i></span>
               </div>
               <strong id="metricNet">0,00 EUR</strong>
               <small id="metricNetHint">Sin movimientos</small>
@@ -128,7 +133,7 @@
             <article class="metric-card">
               <div class="metric-heading">
                 <span>Gasto total</span>
-                <i data-lucide="arrow-down-left"></i>
+                <span class="metric-icon" data-tone="red"><i data-lucide="arrow-down-left"></i></span>
               </div>
               <strong id="metricExpenses">0,00 EUR</strong>
               <small>Compras, resets, activaciones y fees</small>
@@ -136,7 +141,7 @@
             <article class="metric-card">
               <div class="metric-heading">
                 <span>Retiros</span>
-                <i data-lucide="arrow-up-right"></i>
+                <span class="metric-icon" data-tone="green"><i data-lucide="arrow-up-right"></i></span>
               </div>
               <strong id="metricIncome">0,00 EUR</strong>
               <small>Payouts, refunds y otros ingresos</small>
@@ -144,7 +149,7 @@
             <article class="metric-card">
               <div class="metric-heading">
                 <span>ROI</span>
-                <i data-lucide="percent"></i>
+                <span class="metric-icon" data-tone="violet"><i data-lucide="percent"></i></span>
               </div>
               <strong id="metricRoi">0,00%</strong>
               <small id="metricRoiHint">Base: gasto total</small>
@@ -152,7 +157,7 @@
             <article class="metric-card">
               <div class="metric-heading">
                 <span>Break-even</span>
-                <i data-lucide="target"></i>
+                <span class="metric-icon" data-tone="amber"><i data-lucide="target"></i></span>
               </div>
               <strong id="metricBreakEven">0,00 EUR</strong>
               <small>Retiros necesarios para empatar</small>
@@ -160,7 +165,7 @@
             <article class="metric-card">
               <div class="metric-heading">
                 <span>Activas</span>
-                <i data-lucide="circle-check-big"></i>
+                <span class="metric-icon" data-tone="cyan"><i data-lucide="circle-check-big"></i></span>
               </div>
               <strong id="metricActiveAccounts">0</strong>
               <small id="metricAccountHint">0 cuentas registradas</small>
