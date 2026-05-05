@@ -103,6 +103,58 @@ body {
     linear-gradient(180deg, var(--bg-top) 0%, var(--bg) 280px);
 }
 
+[hidden] {
+  display: none !important;
+}
+
+.auth-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(124, 58, 237, 0.12), transparent 32%),
+    linear-gradient(180deg, var(--bg-top) 0%, var(--bg) 100%);
+}
+
+.auth-card {
+  display: grid;
+  gap: 16px;
+  width: min(420px, 100%);
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.auth-card img {
+  width: 170px;
+  height: auto;
+  transform: translateX(-4px);
+}
+
+.auth-card h1 {
+  font-size: 34px;
+}
+
+.auth-card p {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.auth-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.auth-message {
+  min-height: 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 button,
 input,
 select,
@@ -456,6 +508,33 @@ h2 {
 
 .topbar-actions .primary-button {
   min-width: 178px;
+}
+
+.session-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  max-width: 240px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--subtle-bg);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.session-pill span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-pill svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
 }
 
 .section-panel {
@@ -1044,6 +1123,12 @@ tbody tr:hover {
   box-shadow: 0 30px 70px rgba(0, 0, 0, 0.46);
 }
 
+:root[data-theme="dark"] .session-pill {
+  background: #0c1016;
+  border-color: #303847;
+  color: #cbd5e1;
+}
+
 @media (max-width: 1180px) {
   .metrics-grid {
     grid-template-columns: repeat(3, minmax(150px, 1fr));
@@ -1152,17 +1237,32 @@ tbody tr:hover {
     width: 100%;
   }
 
+  .topbar-actions .session-pill {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    max-width: none;
+    width: 100%;
+  }
+
   .topbar-actions .theme-toggle {
     width: 42px;
     grid-column: 1;
+    grid-row: 2;
+  }
+
+  .topbar-actions #logoutButton {
+    grid-column: 2 / 4;
+    grid-row: 2;
   }
 
   .topbar-actions #addFirmButton {
-    grid-column: 2;
+    grid-column: 1;
+    grid-row: 3;
   }
 
   .topbar-actions #addAccountButton {
-    grid-column: 3;
+    grid-column: 2 / 4;
+    grid-row: 3;
   }
 
   .sidebar-actions .ghost-button {
@@ -1181,6 +1281,7 @@ tbody tr:hover {
 
   .topbar-actions #addTransactionButton {
     grid-column: 1 / -1;
+    grid-row: 4;
   }
 
   .metric-card {

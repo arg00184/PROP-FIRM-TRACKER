@@ -2,6 +2,11 @@ const LEGACY_STORAGE_KEYS = ["finix:v1", "prop-firm-tracker:v1"];
 const LEGACY_THEME_STORAGE_KEYS = ["finix:theme", "prop-firm-tracker:theme"];
 const STORAGE_KEY = "trazza:v1";
 const THEME_STORAGE_KEY = "trazza:theme";
+const LOCAL_MIGRATION_BACKUP_KEY = "trazza:local-backup-before-cloud";
+const LOCAL_MIGRATED_KEY = "trazza:local-migrated-to-cloud";
+const SUPABASE_URL = "https://sfdxbchjvhcdnjlpuffg.supabase.co";
+const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmZHhiY2hqdmhjZG5qbHB1ZmZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5NzUyMDYsImV4cCI6MjA5MzU1MTIwNn0.hYqL43T7yGc2WYCaNCpI78VaKYh9mgYO3mnrkclVp5g";
 const EURO = "EUR";
 
 const categoryLabels = {
@@ -35,21 +40,34 @@ const defaultState = {
 
 let state = loadState();
 let confirmHandler = null;
+let currentSession = null;
+let currentUser = null;
+let cloudLoading = false;
+const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const els = {};
 
 applyTheme(getInitialTheme());
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   bindElements();
   setCurrentDate();
   bindEvents();
   updateThemeToggle();
   refreshAll();
+  await initializeCloud();
 });
 
 function bindElements() {
   [
+    "authScreen",
+    "authForm",
+    "authEmail",
+    "authPassword",
+    "authLoginButton",
+    "authSignupButton",
+    "authMessage",
+    "appShell",
     "pageTitle",
     "currentDateLabel",
     "metricNet",
@@ -115,14 +133,25 @@ function bindElements() {
     "confirmMessage",
     "confirmAcceptButton",
     "importFileInput",
+    "migrateLocalButton",
     "toast",
     "themeToggleButton",
+    "sessionPill",
+    "userEmail",
+    "logoutButton",
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
 }
 
 function bindEvents() {
+  els.authForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    signIn();
+  });
+  els.authSignupButton.addEventListener("click", signUp);
+  els.logoutButton.addEventListener("click", signOut);
+
   document.querySelectorAll(".nav-item").forEach((button) => {
     button.addEventListener("click", () => setActiveSection(button.dataset.section));
   });
@@ -179,10 +208,11 @@ function bindEvents() {
   document.getElementById("exportCsvButton").addEventListener("click", exportCsv);
   document.getElementById("importJsonButton").addEventListener("click", () => els.importFileInput.click());
   els.importFileInput.addEventListener("change", importJson);
+  els.migrateLocalButton.addEventListener("click", migrateLocalData);
 
-  els.confirmAcceptButton.addEventListener("click", () => {
+  els.confirmAcceptButton.addEventListener("click", async () => {
     if (confirmHandler) {
-      confirmHandler();
+      await confirmHandler();
       confirmHandler = null;
     }
     closeDialog("confirmDialog");
@@ -191,6 +221,140 @@ function bindEvents() {
   window.addEventListener("resize", debounce(() => {
     drawCharts(getSummary());
   }, 120));
+}
+
+async function initializeCloud() {
+  maybeCreateLocalMigrationBackup();
+
+  if (!supabaseClient) {
+    setAppAccess(false);
+    els.authMessage.textContent = "No se pudo cargar Supabase. Revisa tu conexion.";
+    return;
+  }
+
+  setAppAccess(false);
+  setAuthBusy(true, "Comprobando sesion...");
+
+  const { data, error } = await supabaseClient.auth.getSession();
+  setAuthBusy(false);
+  if (error) {
+    els.authMessage.textContent = error.message;
+    return;
+  }
+
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
+    handleSession(session);
+  });
+
+  await handleSession(data.session);
+}
+
+async function handleSession(session) {
+  currentSession = session;
+  currentUser = session?.user || null;
+  setAppAccess(Boolean(currentUser));
+
+  if (!currentUser) {
+    state = loadState();
+    refreshAll();
+    return;
+  }
+
+  await loadCloudState();
+}
+
+function setAppAccess(isAuthenticated) {
+  els.authScreen.hidden = isAuthenticated;
+  els.appShell.hidden = !isAuthenticated;
+  els.sessionPill.hidden = !isAuthenticated;
+  els.logoutButton.hidden = !isAuthenticated;
+  els.userEmail.textContent = currentUser?.email || "";
+  updateMigrationButton();
+  refreshIcons();
+}
+
+function setAuthBusy(isBusy, message = "") {
+  els.authLoginButton.disabled = isBusy;
+  els.authSignupButton.disabled = isBusy;
+  els.authMessage.textContent = message;
+}
+
+function getAuthCredentials() {
+  return {
+    email: els.authEmail.value.trim(),
+    password: els.authPassword.value,
+  };
+}
+
+async function signIn() {
+  const { email, password } = getAuthCredentials();
+  if (!email || !password || !supabaseClient) return;
+
+  setAuthBusy(true, "Entrando...");
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  setAuthBusy(false);
+
+  if (error) {
+    els.authMessage.textContent = error.message;
+    return;
+  }
+  els.authMessage.textContent = "";
+}
+
+async function signUp() {
+  const { email, password } = getAuthCredentials();
+  if (!email || !password || !supabaseClient) return;
+
+  setAuthBusy(true, "Creando cuenta...");
+  const { data, error } = await supabaseClient.auth.signUp({ email, password });
+  setAuthBusy(false);
+
+  if (error) {
+    els.authMessage.textContent = error.message;
+    return;
+  }
+
+  if (!data.session) {
+    els.authMessage.textContent = "Cuenta creada. Revisa tu email para confirmar el acceso.";
+    return;
+  }
+
+  els.authMessage.textContent = "Cuenta creada. Entrando...";
+}
+
+async function signOut() {
+  if (!supabaseClient) return;
+  const { error } = await supabaseClient.auth.signOut();
+  if (error) {
+    toast(error.message);
+  }
+}
+
+async function loadCloudState() {
+  if (!currentUser || !supabaseClient || cloudLoading) return;
+  cloudLoading = true;
+
+  try {
+    const [firmsResult, accountsResult, transactionsResult] = await Promise.all([
+      supabaseClient.from("firms").select("*").order("name", { ascending: true }),
+      supabaseClient.from("accounts").select("*").order("created_at", { ascending: true }),
+      supabaseClient.from("transactions").select("*").order("date", { ascending: true }),
+    ]);
+
+    [firmsResult, accountsResult, transactionsResult].forEach(throwIfSupabaseError);
+
+    state = {
+      firms: (firmsResult.data || []).map(fromDbFirm),
+      accounts: (accountsResult.data || []).map(fromDbAccount),
+      transactions: (transactionsResult.data || []).map(fromDbTransaction),
+    };
+    refreshAll();
+    updateMigrationButton();
+  } catch (error) {
+    toast(error.message || "No se pudieron cargar los datos.");
+  } finally {
+    cloudLoading = false;
+  }
 }
 
 function getInitialTheme() {
@@ -258,6 +422,88 @@ function loadState() {
 
 function persist() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function throwIfSupabaseError(result) {
+  if (result.error) throw result.error;
+}
+
+function fromDbFirm(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    notes: row.notes || "",
+    createdAt: row.created_at,
+    updatedAt: row.created_at,
+  };
+}
+
+function fromDbAccount(row) {
+  return {
+    id: row.id,
+    firmId: row.firm_id || "",
+    name: row.name,
+    size: row.size || "",
+    status: row.status,
+    purchasedAt: row.purchased_at || "",
+    notes: row.notes || "",
+    createdAt: row.created_at,
+    updatedAt: row.created_at,
+  };
+}
+
+function fromDbTransaction(row) {
+  return {
+    id: row.id,
+    date: row.date,
+    kind: row.kind,
+    category: row.category,
+    amount: Number(row.amount || 0),
+    currency: EURO,
+    firmId: row.firm_id || "",
+    accountId: row.account_id || "",
+    note: row.note || "",
+    createdAt: row.created_at,
+    updatedAt: row.created_at,
+  };
+}
+
+function firmToDb(firm) {
+  return {
+    id: firm.id,
+    user_id: currentUser.id,
+    name: firm.name,
+    type: firm.type,
+    notes: firm.notes || null,
+  };
+}
+
+function accountToDb(account) {
+  return {
+    id: account.id,
+    user_id: currentUser.id,
+    firm_id: account.firmId || null,
+    name: account.name,
+    size: account.size || null,
+    status: account.status,
+    purchased_at: account.purchasedAt || null,
+    notes: account.notes || null,
+  };
+}
+
+function transactionToDb(transaction) {
+  return {
+    id: transaction.id,
+    user_id: currentUser.id,
+    firm_id: transaction.firmId || null,
+    account_id: transaction.accountId || null,
+    date: transaction.date,
+    kind: transaction.kind,
+    category: transaction.category,
+    amount: transaction.amount,
+    note: transaction.note || null,
+  };
 }
 
 function refreshAll() {
@@ -938,9 +1184,11 @@ function openTransactionDialog(transaction = null) {
   showDialog(els.transactionDialog);
 }
 
-function saveFirmFromForm(event) {
+async function saveFirmFromForm(event) {
   event.preventDefault();
-  const id = els.firmId.value || createId("firm");
+  if (!currentUser) return toast("Inicia sesion para guardar.");
+
+  const id = els.firmId.value || createId();
   const existing = state.firms.find((firm) => firm.id === id);
   const firm = {
     id,
@@ -953,21 +1201,31 @@ function saveFirmFromForm(event) {
 
   if (!firm.name) return;
 
-  if (existing) {
-    state.firms = state.firms.map((item) => (item.id === id ? firm : item));
-  } else {
-    state.firms.push(firm);
-  }
+  try {
+    const result = await supabaseClient.from("firms").upsert(firmToDb(firm)).select().single();
+    throwIfSupabaseError(result);
+    const savedFirm = fromDbFirm(result.data);
 
-  persist();
-  closeDialog("firmDialog");
-  refreshAll();
-  toast("Firm guardada.");
+    if (existing) {
+      state.firms = state.firms.map((item) => (item.id === id ? savedFirm : item));
+    } else {
+      state.firms.push(savedFirm);
+    }
+
+    persist();
+    closeDialog("firmDialog");
+    refreshAll();
+    toast("Firm guardada.");
+  } catch (error) {
+    toast(error.message || "No se pudo guardar la firm.");
+  }
 }
 
-function saveAccountFromForm(event) {
+async function saveAccountFromForm(event) {
   event.preventDefault();
-  const id = els.accountId.value || createId("account");
+  if (!currentUser) return toast("Inicia sesion para guardar.");
+
+  const id = els.accountId.value || createId();
   const existing = state.accounts.find((account) => account.id === id);
   const account = {
     id,
@@ -983,24 +1241,39 @@ function saveAccountFromForm(event) {
 
   if (!account.firmId || !account.name) return;
 
-  if (existing) {
-    state.accounts = state.accounts.map((item) => (item.id === id ? account : item));
-    state.transactions = state.transactions.map((tx) =>
-      tx.accountId === id ? { ...tx, firmId: account.firmId, updatedAt: nowIso() } : tx
-    );
-  } else {
-    state.accounts.push(account);
-  }
+  try {
+    const result = await supabaseClient.from("accounts").upsert(accountToDb(account)).select().single();
+    throwIfSupabaseError(result);
+    const savedAccount = fromDbAccount(result.data);
 
-  persist();
-  closeDialog("accountDialog");
-  refreshAll();
-  toast("Cuenta guardada.");
+    if (existing) {
+      state.accounts = state.accounts.map((item) => (item.id === id ? savedAccount : item));
+      state.transactions = state.transactions.map((tx) =>
+        tx.accountId === id ? { ...tx, firmId: savedAccount.firmId, updatedAt: nowIso() } : tx
+      );
+      const txUpdate = await supabaseClient
+        .from("transactions")
+        .update({ firm_id: savedAccount.firmId })
+        .eq("account_id", id);
+      throwIfSupabaseError(txUpdate);
+    } else {
+      state.accounts.push(savedAccount);
+    }
+
+    persist();
+    closeDialog("accountDialog");
+    refreshAll();
+    toast("Cuenta guardada.");
+  } catch (error) {
+    toast(error.message || "No se pudo guardar la cuenta.");
+  }
 }
 
-function saveTransactionFromForm(event) {
+async function saveTransactionFromForm(event) {
   event.preventDefault();
-  const id = els.transactionId.value || createId("tx");
+  if (!currentUser) return toast("Inicia sesion para guardar.");
+
+  const id = els.transactionId.value || createId();
   const existing = state.transactions.find((tx) => tx.id === id);
   const amount = Math.abs(Number(els.transactionAmount.value));
   const account = getAccount(els.transactionAccount.value);
@@ -1020,16 +1293,24 @@ function saveTransactionFromForm(event) {
 
   if (!transaction.date || !transaction.kind || !transaction.category || !transaction.amount || !transaction.firmId) return;
 
-  if (existing) {
-    state.transactions = state.transactions.map((item) => (item.id === id ? transaction : item));
-  } else {
-    state.transactions.push(transaction);
-  }
+  try {
+    const result = await supabaseClient.from("transactions").upsert(transactionToDb(transaction)).select().single();
+    throwIfSupabaseError(result);
+    const savedTransaction = fromDbTransaction(result.data);
 
-  persist();
-  closeDialog("transactionDialog");
-  refreshAll();
-  toast("Movimiento guardado.");
+    if (existing) {
+      state.transactions = state.transactions.map((item) => (item.id === id ? savedTransaction : item));
+    } else {
+      state.transactions.push(savedTransaction);
+    }
+
+    persist();
+    closeDialog("transactionDialog");
+    refreshAll();
+    toast("Movimiento guardado.");
+  } catch (error) {
+    toast(error.message || "No se pudo guardar el movimiento.");
+  }
 }
 
 function handleTableAction(event) {
@@ -1055,11 +1336,17 @@ function requestDeleteFirm(id) {
     return;
   }
 
-  openConfirm("Eliminar firm", `Eliminar ${firm?.name || "esta firm"}?`, () => {
-    state.firms = state.firms.filter((item) => item.id !== id);
-    persist();
-    refreshAll();
-    toast("Firm eliminada.");
+  openConfirm("Eliminar firm", `Eliminar ${firm?.name || "esta firm"}?`, async () => {
+    try {
+      const result = await supabaseClient.from("firms").delete().eq("id", id);
+      throwIfSupabaseError(result);
+      state.firms = state.firms.filter((item) => item.id !== id);
+      persist();
+      refreshAll();
+      toast("Firm eliminada.");
+    } catch (error) {
+      toast(error.message || "No se pudo eliminar la firm.");
+    }
   });
 }
 
@@ -1072,20 +1359,32 @@ function requestDeleteAccount(id) {
     return;
   }
 
-  openConfirm("Eliminar cuenta", `Eliminar ${account?.name || "esta cuenta"}?`, () => {
-    state.accounts = state.accounts.filter((item) => item.id !== id);
-    persist();
-    refreshAll();
-    toast("Cuenta eliminada.");
+  openConfirm("Eliminar cuenta", `Eliminar ${account?.name || "esta cuenta"}?`, async () => {
+    try {
+      const result = await supabaseClient.from("accounts").delete().eq("id", id);
+      throwIfSupabaseError(result);
+      state.accounts = state.accounts.filter((item) => item.id !== id);
+      persist();
+      refreshAll();
+      toast("Cuenta eliminada.");
+    } catch (error) {
+      toast(error.message || "No se pudo eliminar la cuenta.");
+    }
   });
 }
 
 function requestDeleteTransaction(id) {
-  openConfirm("Eliminar movimiento", "Eliminar este movimiento?", () => {
-    state.transactions = state.transactions.filter((item) => item.id !== id);
-    persist();
-    refreshAll();
-    toast("Movimiento eliminado.");
+  openConfirm("Eliminar movimiento", "Eliminar este movimiento?", async () => {
+    try {
+      const result = await supabaseClient.from("transactions").delete().eq("id", id);
+      throwIfSupabaseError(result);
+      state.transactions = state.transactions.filter((item) => item.id !== id);
+      persist();
+      refreshAll();
+      toast("Movimiento eliminado.");
+    } catch (error) {
+      toast(error.message || "No se pudo eliminar el movimiento.");
+    }
   });
 }
 
@@ -1154,28 +1453,182 @@ function importJson(event) {
   const file = event.target.files?.[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     try {
       const parsed = JSON.parse(String(reader.result));
       const imported = parsed.data || parsed;
       if (!Array.isArray(imported.firms) || !Array.isArray(imported.accounts) || !Array.isArray(imported.transactions)) {
         throw new Error("Invalid file");
       }
-      state = {
-        firms: imported.firms,
-        accounts: imported.accounts,
-        transactions: imported.transactions,
-      };
-      persist();
-      refreshAll();
+
+      if (currentUser) {
+        await replaceCloudState(imported);
+      } else {
+        state = {
+          firms: imported.firms,
+          accounts: imported.accounts,
+          transactions: imported.transactions,
+        };
+        persist();
+        refreshAll();
+      }
       toast("Datos importados.");
-    } catch {
-      toast("El archivo no es valido.");
+    } catch (error) {
+      toast(error.message || "El archivo no es valido.");
     } finally {
       event.target.value = "";
     }
   };
   reader.readAsText(file);
+}
+
+async function migrateLocalData() {
+  const localState = getLocalStateForMigration();
+  if (!localState) {
+    toast("No hay datos locales para subir.");
+    updateMigrationButton();
+    return;
+  }
+
+  try {
+    await replaceCloudState(localState);
+    localStorage.setItem(LOCAL_MIGRATED_KEY, nowIso());
+    updateMigrationButton();
+    toast("Datos locales subidos a Supabase.");
+  } catch (error) {
+    toast(error.message || "No se pudieron subir los datos locales.");
+  }
+}
+
+async function replaceCloudState(imported) {
+  if (!currentUser) throw new Error("Inicia sesion para importar datos.");
+
+  const mapped = remapStateForCloud(imported);
+  const deleteTransactions = await supabaseClient.from("transactions").delete().eq("user_id", currentUser.id);
+  throwIfSupabaseError(deleteTransactions);
+  const deleteAccounts = await supabaseClient.from("accounts").delete().eq("user_id", currentUser.id);
+  throwIfSupabaseError(deleteAccounts);
+  const deleteFirms = await supabaseClient.from("firms").delete().eq("user_id", currentUser.id);
+  throwIfSupabaseError(deleteFirms);
+
+  if (mapped.firms.length) {
+    const result = await supabaseClient.from("firms").insert(mapped.firms.map(firmToDb));
+    throwIfSupabaseError(result);
+  }
+  if (mapped.accounts.length) {
+    const result = await supabaseClient.from("accounts").insert(mapped.accounts.map(accountToDb));
+    throwIfSupabaseError(result);
+  }
+  if (mapped.transactions.length) {
+    const result = await supabaseClient.from("transactions").insert(mapped.transactions.map(transactionToDb));
+    throwIfSupabaseError(result);
+  }
+
+  await loadCloudState();
+}
+
+function remapStateForCloud(imported) {
+  const firmIds = new Map();
+  const accountIds = new Map();
+
+  const firms = imported.firms
+    .filter((firm) => firm?.name)
+    .map((firm) => {
+      const id = createId();
+      firmIds.set(firm.id, id);
+      return {
+        id,
+        name: String(firm.name).trim(),
+        type: firm.type || "Futuros",
+        notes: firm.notes || "",
+        createdAt: firm.createdAt || nowIso(),
+        updatedAt: nowIso(),
+      };
+    });
+
+  const accounts = imported.accounts
+    .filter((account) => account?.name && firmIds.has(account.firmId))
+    .map((account) => {
+      const id = createId();
+      accountIds.set(account.id, id);
+      return {
+        id,
+        firmId: firmIds.get(account.firmId),
+        name: String(account.name).trim(),
+        size: account.size || "",
+        status: account.status || "active",
+        purchasedAt: account.purchasedAt || "",
+        notes: account.notes || "",
+        createdAt: account.createdAt || nowIso(),
+        updatedAt: nowIso(),
+      };
+    });
+
+  const transactions = imported.transactions
+    .filter((transaction) => transaction?.date && transaction?.kind && transaction?.category && Number(transaction.amount) > 0)
+    .map((transaction) => {
+      const accountId = accountIds.get(transaction.accountId) || "";
+      const account = accounts.find((item) => item.id === accountId);
+      const firmId = account?.firmId || firmIds.get(transaction.firmId) || "";
+      return {
+        id: createId(),
+        date: transaction.date,
+        kind: transaction.kind,
+        category: transaction.category,
+        amount: Math.abs(Number(transaction.amount)),
+        currency: EURO,
+        firmId,
+        accountId,
+        note: transaction.note || "",
+        createdAt: transaction.createdAt || nowIso(),
+        updatedAt: nowIso(),
+      };
+    })
+    .filter((transaction) => transaction.firmId);
+
+  return { firms, accounts, transactions };
+}
+
+function maybeCreateLocalMigrationBackup() {
+  if (localStorage.getItem(LOCAL_MIGRATION_BACKUP_KEY)) return;
+  const raw = findLocalStateRaw([STORAGE_KEY, ...LEGACY_STORAGE_KEYS]);
+  if (raw) {
+    localStorage.setItem(LOCAL_MIGRATION_BACKUP_KEY, raw);
+  }
+}
+
+function getLocalStateForMigration() {
+  if (localStorage.getItem(LOCAL_MIGRATED_KEY)) return null;
+  const raw = findLocalStateRaw([LOCAL_MIGRATION_BACKUP_KEY, STORAGE_KEY, ...LEGACY_STORAGE_KEYS]);
+  return raw ? JSON.parse(raw) : null;
+}
+
+function findLocalStateRaw(keys) {
+  for (const key of keys) {
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (hasStateData(parsed)) return raw;
+    } catch {
+      continue;
+    }
+  }
+  return "";
+}
+
+function hasStateData(value) {
+  return Boolean(
+    Array.isArray(value?.firms) &&
+      Array.isArray(value?.accounts) &&
+      Array.isArray(value?.transactions) &&
+      (value.firms.length || value.accounts.length || value.transactions.length)
+  );
+}
+
+function updateMigrationButton() {
+  if (!els.migrateLocalButton) return;
+  els.migrateLocalButton.hidden = !currentUser || !getLocalStateForMigration();
 }
 
 function downloadFile(filename, content, type) {
@@ -1303,8 +1756,11 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function createId(prefix) {
-  return `${prefix}_${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(16).slice(2)}`}`;
+function createId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (char) =>
+    (Number(char) ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (Number(char) / 4)))).toString(16)
+  );
 }
 
 function normalize(value) {

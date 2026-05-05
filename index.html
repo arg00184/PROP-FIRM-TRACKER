@@ -7,10 +7,34 @@
     <link rel="icon" href="./assets/trazza.png" type="image/png" />
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://unpkg.com/lucide@latest" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
     <script src="./app.js" defer></script>
   </head>
   <body>
-    <div class="app-shell">
+    <section class="auth-screen" id="authScreen" hidden>
+      <form class="auth-card" id="authForm">
+        <img src="./assets/trazza.png" alt="trazza" />
+        <div>
+          <h1>trazza</h1>
+          <p>Accede para sincronizar tus firms, cuentas y movimientos.</p>
+        </div>
+        <label>
+          Email
+          <input id="authEmail" type="email" autocomplete="email" required placeholder="tu@email.com" />
+        </label>
+        <label>
+          Password
+          <input id="authPassword" type="password" autocomplete="current-password" required minlength="6" placeholder="Minimo 6 caracteres" />
+        </label>
+        <div class="auth-actions">
+          <button class="primary-button" id="authLoginButton" type="submit">Entrar</button>
+          <button class="secondary-button" id="authSignupButton" type="button">Crear cuenta</button>
+        </div>
+        <p class="auth-message" id="authMessage"></p>
+      </form>
+    </section>
+
+    <div class="app-shell" id="appShell">
       <aside class="sidebar">
         <div class="brand">
           <div class="brand-mark">
@@ -50,6 +74,10 @@
             <i data-lucide="upload"></i>
             <span>Importar JSON</span>
           </button>
+          <button class="ghost-button" id="migrateLocalButton" hidden>
+            <i data-lucide="cloud-upload"></i>
+            <span>Subir datos locales</span>
+          </button>
           <input id="importFileInput" type="file" accept="application/json" hidden />
         </div>
       </aside>
@@ -63,6 +91,14 @@
           <div class="topbar-actions">
             <button class="theme-toggle" id="themeToggleButton" type="button" aria-label="Cambiar a modo oscuro" title="Cambiar tema">
               <i data-lucide="moon"></i>
+            </button>
+            <div class="session-pill" id="sessionPill" hidden>
+              <i data-lucide="user-round"></i>
+              <span id="userEmail"></span>
+            </div>
+            <button class="secondary-button" id="logoutButton" hidden>
+              <i data-lucide="log-out"></i>
+              <span>Salir</span>
             </button>
             <button class="secondary-button" id="addFirmButton">
               <i data-lucide="building-2"></i>
