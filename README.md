@@ -1,4 +1,4 @@
-# Prop Firm Tracker
+# trazza
 
 Web local para controlar el resultado real de cuentas de prop firms: compras, resets, activaciones, fees, payouts y refunds.
 

@@ -1,5 +1,7 @@
-const STORAGE_KEY = "prop-firm-tracker:v1";
-const THEME_STORAGE_KEY = "prop-firm-tracker:theme";
+const LEGACY_STORAGE_KEYS = ["finix:v1", "prop-firm-tracker:v1"];
+const LEGACY_THEME_STORAGE_KEYS = ["finix:theme", "prop-firm-tracker:theme"];
+const STORAGE_KEY = "trazza:v1";
+const THEME_STORAGE_KEY = "trazza:theme";
 const EURO = "EUR";
 
 const categoryLabels = {
@@ -192,7 +194,12 @@ function bindEvents() {
 }
 
 function getInitialTheme() {
-  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  const stored =
+    localStorage.getItem(THEME_STORAGE_KEY) ||
+    LEGACY_THEME_STORAGE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
+  if (!localStorage.getItem(THEME_STORAGE_KEY) && stored) {
+    localStorage.setItem(THEME_STORAGE_KEY, stored);
+  }
   if (stored === "light" || stored === "dark") return stored;
   return "light";
 }
@@ -231,8 +238,13 @@ function setCurrentDate() {
 
 function loadState() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw =
+      localStorage.getItem(STORAGE_KEY) ||
+      LEGACY_STORAGE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
     if (!raw) return structuredClone(defaultState);
+    if (!localStorage.getItem(STORAGE_KEY)) {
+      localStorage.setItem(STORAGE_KEY, raw);
+    }
     const parsed = JSON.parse(raw);
     return {
       firms: Array.isArray(parsed.firms) ? parsed.firms : [],
@@ -1103,11 +1115,11 @@ function closeDialog(id) {
 function exportJson() {
   const payload = {
     exportedAt: nowIso(),
-    app: "Prop Firm Tracker",
+    app: "trazza",
     version: 1,
     data: state,
   };
-  downloadFile(`prop-firm-tracker-${today()}.json`, JSON.stringify(payload, null, 2), "application/json");
+  downloadFile(`trazza-${today()}.json`, JSON.stringify(payload, null, 2), "application/json");
   toast("JSON exportado.");
 }
 
@@ -1134,7 +1146,7 @@ function exportCsv() {
       }),
   ];
   const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
-  downloadFile(`prop-firm-tracker-movimientos-${today()}.csv`, csv, "text/csv;charset=utf-8");
+  downloadFile(`trazza-movimientos-${today()}.csv`, csv, "text/csv;charset=utf-8");
   toast("CSV exportado.");
 }
 

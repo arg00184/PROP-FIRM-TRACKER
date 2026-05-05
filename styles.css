@@ -8,7 +8,7 @@
   --line: #dde5e2;
   --line-strong: #c8d4cf;
   --bg-top: #f7f9f8;
-  --sidebar-bg: #f9fbfa;
+  --sidebar-bg: #ffffff;
   --input-bg: #ffffff;
   --input-border: #cedbd6;
   --panel-header-line: #edf2f0;
@@ -47,41 +47,41 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0f1514;
-  --bg-top: #151d1b;
-  --surface: #161f1d;
-  --surface-2: #1b2724;
-  --text: #edf5f2;
-  --muted: #9baca6;
-  --line: #293734;
-  --line-strong: #3a4d48;
-  --sidebar-bg: #111816;
-  --input-bg: #101715;
-  --input-border: #354641;
-  --panel-header-line: #263430;
-  --table-head-bg: #121b19;
-  --subtle-bg: #111a18;
-  --hover-bg: #1a2522;
-  --nav-active-bg: rgba(20, 184, 166, 0.12);
-  --chart-grid: #263430;
-  --chart-guide: #1f2c29;
-  --chart-axis: #53655f;
-  --chart-label-bg: #101715;
-  --chart-label-border: #354641;
-  --chart-label-text: #edf5f2;
+  --bg: #07090d;
+  --bg-top: #0c0f14;
+  --surface: #101318;
+  --surface-2: #151922;
+  --text: #eef2f7;
+  --muted: #9aa4b2;
+  --line: #222935;
+  --line-strong: #343d4d;
+  --sidebar-bg: #080b10;
+  --input-bg: #0b0e13;
+  --input-border: #2a303a;
+  --panel-header-line: #202633;
+  --table-head-bg: #0c1016;
+  --subtle-bg: #0c1016;
+  --hover-bg: #151a22;
+  --nav-active-bg: rgba(124, 58, 237, 0.16);
+  --chart-grid: #202633;
+  --chart-guide: #171c25;
+  --chart-axis: #56616f;
+  --chart-label-bg: #0b0e13;
+  --chart-label-border: #2a303a;
+  --chart-label-text: #eef2f7;
   --capital: #a78bfa;
   --capital-fill: rgba(167, 139, 250, 0.16);
-  --toast-bg: #13241f;
-  --toast-border: #245546;
-  --toast-text: #b9f3dc;
+  --toast-bg: #12141c;
+  --toast-border: #343d4d;
+  --toast-text: #e9ddff;
   --green: #2dd49a;
   --green-soft: rgba(45, 212, 154, 0.13);
   --red: #f87171;
   --red-soft: rgba(248, 113, 113, 0.13);
   --amber: #fbbf24;
   --amber-soft: rgba(251, 191, 36, 0.14);
-  --accent: #14b8a6;
-  --accent-strong: #0f9488;
+  --accent: #8b5cf6;
+  --accent-strong: #7c3aed;
   --shadow: 0 18px 36px rgba(0, 0, 0, 0.24);
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.22);
 }
@@ -141,8 +141,8 @@ button:disabled {
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 44px;
+  gap: 0;
+  min-height: 58px;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--line);
 }
@@ -150,15 +150,25 @@ button:disabled {
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 178px;
+  height: 54px;
   flex: 0 0 auto;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .brand-mark img {
   display: block;
-  width: 40px;
-  height: 40px;
+  width: 360px;
+  max-width: none;
+  height: auto;
+  transform: translate(-96px, -64px);
+}
+
+:root[data-theme="dark"] .brand-mark img {
+  mix-blend-mode: normal;
 }
 
 .brand-name,
@@ -993,36 +1003,36 @@ tbody tr:hover {
 :root[data-theme="dark"] .ghost-button,
 :root[data-theme="dark"] .icon-button,
 :root[data-theme="dark"] .theme-toggle {
-  background: linear-gradient(180deg, #1b2724 0%, #14201d 100%);
-  border-color: #41544f;
-  color: #f3fbf8;
+  background: linear-gradient(180deg, #181c25 0%, #10141b 100%);
+  border-color: #303847;
+  color: #f4f7fb;
   opacity: 1;
-  -webkit-text-fill-color: #f3fbf8;
+  -webkit-text-fill-color: #f4f7fb;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.05) inset,
     0 10px 22px rgba(0, 0, 0, 0.22);
 }
 
 :root[data-theme="dark"] .nav-item.active {
-  background: #1b2724;
-  border-color: #31524b;
-  color: #f3fbf8;
-  -webkit-text-fill-color: #f3fbf8;
+  background: #151922;
+  border-color: #353f52;
+  color: #f4f7fb;
+  -webkit-text-fill-color: #f4f7fb;
 }
 
 :root[data-theme="dark"] .nav-item:hover {
-  background: #16211e;
-  border-color: #31524b;
-  color: #f3fbf8;
-  -webkit-text-fill-color: #f3fbf8;
+  background: #151a22;
+  border-color: #353f52;
+  color: #f4f7fb;
+  -webkit-text-fill-color: #f4f7fb;
 }
 
 :root[data-theme="dark"] .secondary-button:hover,
 :root[data-theme="dark"] .theme-toggle:hover,
 :root[data-theme="dark"] .ghost-button:hover,
 :root[data-theme="dark"] .icon-button:hover {
-  background: #22302d;
-  border-color: #526a63;
+  background: #1d2330;
+  border-color: #424c61;
   color: #ffffff;
   -webkit-text-fill-color: #ffffff;
   box-shadow:
