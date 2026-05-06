@@ -63,11 +63,15 @@ function bindElements() {
   [
     "authScreen",
     "authForm",
+    "authNameField",
+    "authName",
     "authEmail",
     "authPassword",
     "authTitle",
     "authIntro",
+    "authGoogleButton",
     "authLoginButton",
+    "authSwitchText",
     "authSignupButton",
     "authMessage",
     "appShell",
@@ -152,6 +156,7 @@ function bindEvents() {
     event.preventDefault();
     submitAuthForm();
   });
+  els.authGoogleButton.addEventListener("click", signInWithGoogle);
   els.authSignupButton.addEventListener("click", toggleAuthMode);
   els.logoutButton.addEventListener("click", signOut);
 
@@ -272,12 +277,13 @@ function setAppAccess(isAuthenticated) {
   els.appShell.hidden = !isAuthenticated;
   els.sessionPill.hidden = !isAuthenticated;
   els.logoutButton.hidden = !isAuthenticated;
-  els.userEmail.textContent = currentUser?.email || "";
+  els.userEmail.textContent = getCurrentUserDisplayName();
   updateMigrationButton();
   refreshIcons();
 }
 
 function setAuthBusy(isBusy, message = "") {
+  els.authGoogleButton.disabled = isBusy;
   els.authLoginButton.disabled = isBusy;
   els.authSignupButton.disabled = isBusy;
   els.authMessage.textContent = message;
@@ -285,9 +291,16 @@ function setAuthBusy(isBusy, message = "") {
 
 function getAuthCredentials() {
   return {
+    fullName: els.authName.value.trim(),
     email: els.authEmail.value.trim(),
     password: els.authPassword.value,
   };
+}
+
+function getCurrentUserDisplayName() {
+  if (!currentUser) return "";
+  const metadata = currentUser.user_metadata || {};
+  return metadata.full_name || metadata.name || currentUser.email || "";
 }
 
 function toggleAuthMode() {
@@ -297,12 +310,17 @@ function toggleAuthMode() {
 function setAuthMode(mode) {
   authMode = mode;
   const isSignup = authMode === "signup";
-  els.authTitle.textContent = isSignup ? "Crear cuenta" : "trazza";
+  els.authTitle.hidden = !isSignup;
+  els.authTitle.textContent = isSignup ? "Crear cuenta" : "";
   els.authIntro.textContent = isSignup
     ? "Crea tu acceso para guardar tus datos en la nube."
     : "Accede para sincronizar tus firms, cuentas y movimientos.";
+  els.authNameField.hidden = !isSignup;
+  els.authName.disabled = !isSignup;
+  els.authName.required = isSignup;
   els.authLoginButton.textContent = isSignup ? "Crear cuenta" : "Entrar";
-  els.authSignupButton.textContent = isSignup ? "Ya tengo cuenta" : "Crear cuenta";
+  els.authSwitchText.textContent = isSignup ? "Ya tienes cuenta?" : "No tienes cuenta?";
+  els.authSignupButton.textContent = isSignup ? "Entrar" : "Crear cuenta";
   els.authPassword.autocomplete = isSignup ? "new-password" : "current-password";
   els.authMessage.textContent = "";
 }
@@ -331,11 +349,19 @@ async function signIn() {
 }
 
 async function signUp() {
-  const { email, password } = getAuthCredentials();
-  if (!email || !password || !supabaseClient) return;
+  const { fullName, email, password } = getAuthCredentials();
+  if (!fullName || !email || !password || !supabaseClient) return;
 
   setAuthBusy(true, "Creando cuenta...");
-  const { data, error } = await supabaseClient.auth.signUp({ email, password });
+  const { data, error } = await supabaseClient.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        full_name: fullName,
+      },
+    },
+  });
   setAuthBusy(false);
 
   if (error) {
@@ -349,6 +375,27 @@ async function signUp() {
   }
 
   els.authMessage.textContent = "Cuenta creada. Entrando...";
+}
+
+async function signInWithGoogle() {
+  if (!supabaseClient) return;
+  if (window.location.protocol === "file:") {
+    els.authMessage.textContent = "Google requiere abrir trazza desde Vercel o localhost.";
+    return;
+  }
+
+  setAuthBusy(true, "Abriendo Google...");
+  const { error } = await supabaseClient.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${window.location.origin}${window.location.pathname}`,
+    },
+  });
+
+  if (error) {
+    setAuthBusy(false);
+    els.authMessage.textContent = error.message;
+  }
 }
 
 async function signOut() {
