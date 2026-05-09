@@ -889,19 +889,19 @@ function renderFirmsTable() {
       const accountCount = state.accounts.filter((account) => account.firmId === firm.id).length;
       return `
         <tr>
-          <td>
+          <td data-label="Firm">
             <div class="table-title">
               <strong>${escapeHtml(firm.name)}</strong>
               <span>${escapeHtml(firm.notes || "")}</span>
             </div>
           </td>
-          <td>${escapeHtml(firm.type)}</td>
-          <td>${accountCount}</td>
-          <td class="amount negative">${formatMoney(expenses)}</td>
-          <td class="amount positive">${formatMoney(income)}</td>
-          <td class="amount ${net >= 0 ? "positive" : "negative"}">${formatMoney(net)}</td>
-          <td>${formatPercent(roi)}</td>
-          <td>
+          <td data-label="Tipo">${escapeHtml(firm.type)}</td>
+          <td data-label="Cuentas">${accountCount}</td>
+          <td data-label="Gastos" class="amount negative">${formatMoney(expenses)}</td>
+          <td data-label="Retiros" class="amount positive">${formatMoney(income)}</td>
+          <td data-label="Neto" class="amount ${net >= 0 ? "positive" : "negative"}">${formatMoney(net)}</td>
+          <td data-label="ROI">${formatPercent(roi)}</td>
+          <td data-label="Acciones">
             <div class="row-actions">
               ${actionButton("edit-firm", firm.id, "Editar", "pencil")}
               ${actionButton("delete-firm", firm.id, "Eliminar", "trash-2")}
@@ -941,20 +941,20 @@ function renderAccountsTable() {
       const net = income - expenses;
       return `
         <tr>
-          <td>
+          <td data-label="Cuenta">
             <div class="table-title">
               <strong>${escapeHtml(account.name)}</strong>
               <span>${escapeHtml(account.notes || "")}</span>
             </div>
           </td>
-          <td>${escapeHtml(firm?.name || "Sin firm")}</td>
-          <td>${escapeHtml(account.size || "-")}</td>
-          <td><span class="badge ${account.status}">${statusLabels[account.status] || account.status}</span></td>
-          <td>${formatDate(account.purchasedAt)}</td>
-          <td class="amount negative">${formatMoney(expenses)}</td>
-          <td class="amount positive">${formatMoney(income)}</td>
-          <td class="amount ${net >= 0 ? "positive" : "negative"}">${formatMoney(net)}</td>
-          <td>
+          <td data-label="Firm">${escapeHtml(firm?.name || "Sin firm")}</td>
+          <td data-label="Tamano">${escapeHtml(account.size || "-")}</td>
+          <td data-label="Estado"><span class="badge ${account.status}">${statusLabels[account.status] || account.status}</span></td>
+          <td data-label="Compra">${formatDate(account.purchasedAt)}</td>
+          <td data-label="Gastos" class="amount negative">${formatMoney(expenses)}</td>
+          <td data-label="Retiros" class="amount positive">${formatMoney(income)}</td>
+          <td data-label="Neto" class="amount ${net >= 0 ? "positive" : "negative"}">${formatMoney(net)}</td>
+          <td data-label="Acciones">
             <div class="row-actions">
               ${actionButton("edit-account", account.id, "Editar", "pencil")}
               ${actionButton("delete-account", account.id, "Eliminar", "trash-2")}
@@ -999,14 +999,14 @@ function renderTransactionsTable() {
       const signed = tx.kind === "income" ? tx.amount : -tx.amount;
       return `
         <tr>
-          <td>${formatDate(tx.date)}</td>
-          <td><span class="badge ${tx.kind}">${tx.kind === "income" ? "Retiro" : "Gasto"}</span></td>
-          <td>${categoryLabels[tx.category] || escapeHtml(tx.category)}</td>
-          <td>${escapeHtml(firm?.name || "Sin firm")}</td>
-          <td>${escapeHtml(account?.name || "-")}</td>
-          <td>${escapeHtml(tx.note || "-")}</td>
-          <td class="amount ${signed >= 0 ? "positive" : "negative"}">${formatMoney(signed)}</td>
-          <td>
+          <td data-label="Fecha">${formatDate(tx.date)}</td>
+          <td data-label="Tipo"><span class="badge ${tx.kind}">${tx.kind === "income" ? "Retiro" : "Gasto"}</span></td>
+          <td data-label="Categoria">${categoryLabels[tx.category] || escapeHtml(tx.category)}</td>
+          <td data-label="Firm">${escapeHtml(firm?.name || "Sin firm")}</td>
+          <td data-label="Cuenta">${escapeHtml(account?.name || "-")}</td>
+          <td data-label="Nota">${escapeHtml(tx.note || "-")}</td>
+          <td data-label="Importe" class="amount ${signed >= 0 ? "positive" : "negative"}">${formatMoney(signed)}</td>
+          <td data-label="Acciones">
             <div class="row-actions">
               ${actionButton("edit-transaction", tx.id, "Editar", "pencil")}
               ${actionButton("delete-transaction", tx.id, "Eliminar", "trash-2")}
