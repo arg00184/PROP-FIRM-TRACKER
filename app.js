@@ -94,6 +94,8 @@ function bindElements() {
     "authMessage",
     "appShell",
     "pageTitle",
+    "syncStatus",
+    "syncStatusText",
     "currentDateLabel",
     "metricNet",
     "metricNetHint",
@@ -235,6 +237,7 @@ function bindEvents() {
   document.getElementById("importJsonButton").addEventListener("click", () => els.importFileInput.click());
   els.importFileInput.addEventListener("change", importJson);
   els.migrateLocalButton.addEventListener("click", migrateLocalData);
+  document.addEventListener("click", handleEmptyStateAction);
 
   els.confirmAcceptButton.addEventListener("click", async () => {
     if (confirmHandler) {
@@ -434,6 +437,27 @@ function setAuthBusy(isBusy, message = "") {
   els.authMessage.textContent = message;
 }
 
+function setSyncStatus(status, message = "") {
+  if (!els.syncStatus || !els.syncStatusText) return;
+
+  window.clearTimeout(setSyncStatus.timer);
+  els.syncStatus.classList.remove("loading", "error");
+
+  if (status === "idle") {
+    els.syncStatus.hidden = true;
+    return;
+  }
+
+  els.syncStatus.hidden = false;
+  els.syncStatus.classList.add(status);
+  els.syncStatusText.textContent = message;
+  refreshIcons();
+
+  if (status === "error") {
+    setSyncStatus.timer = window.setTimeout(() => setSyncStatus("idle"), 4200);
+  }
+}
+
 function getAuthCredentials() {
   return {
     fullName: els.authName.value.trim(),
@@ -554,6 +578,8 @@ async function signOut() {
 async function loadCloudState() {
   if (!currentUser || !supabaseClient || cloudLoading) return;
   cloudLoading = true;
+  let hasError = false;
+  setSyncStatus("loading", "Sincronizando datos...");
 
   try {
     const [firmsResult, accountsResult, transactionsResult] = await Promise.all([
@@ -572,9 +598,14 @@ async function loadCloudState() {
     refreshAll();
     updateMigrationButton();
   } catch (error) {
+    hasError = true;
+    setSyncStatus("error", "No se pudo sincronizar");
     toast(error.message || "No se pudieron cargar los datos.");
   } finally {
     cloudLoading = false;
+    if (!hasError) {
+      setSyncStatus("idle");
+    }
   }
 }
 
@@ -782,6 +813,38 @@ function setActiveSection(section) {
   drawCharts(getSummary());
 }
 
+function handleEmptyStateAction(event) {
+  const target = event.target instanceof Element ? event.target : event.target.parentElement;
+  const button = target?.closest("[data-empty-action]");
+  if (!button) return;
+
+  const actions = {
+    "add-firm": () => openFirmDialog(),
+    "add-account": () => openAccountDialog(),
+    "add-transaction": () => openTransactionDialog(),
+    "reset-account-filters": resetAccountFilters,
+    "reset-transaction-filters": resetTransactionFilters,
+  };
+
+  actions[button.dataset.emptyAction]?.();
+}
+
+function resetAccountFilters() {
+  els.accountFirmFilter.value = "all";
+  els.accountStatusFilter.value = "all";
+  els.accountSearch.value = "";
+  renderAccountsTable();
+}
+
+function resetTransactionFilters() {
+  els.transactionFirmFilter.value = "all";
+  els.transactionKindFilter.value = "all";
+  els.transactionFromFilter.value = "";
+  els.transactionToFilter.value = "";
+  els.transactionSearch.value = "";
+  renderTransactionsTable();
+}
+
 function fillFirmSelects() {
   const firmOptions = state.firms
     .slice()
@@ -913,7 +976,18 @@ function renderFirmsTable() {
     .join("");
 
   els.firmsTableBody.innerHTML = rows;
-  els.firmsEmpty.style.display = state.firms.length ? "none" : "block";
+  setTableVisible(els.firmsTableBody, Boolean(rows));
+  if (state.firms.length) {
+    hideEmptyState(els.firmsEmpty);
+  } else {
+    showEmptyState(
+      els.firmsEmpty,
+      "Todavia no hay firms",
+      "Crea tu primera firm para empezar a organizar cuentas, compras y payouts.",
+      "Nueva firm",
+      "add-firm"
+    );
+  }
   refreshIcons();
 }
 
@@ -965,7 +1039,35 @@ function renderAccountsTable() {
     })
     .join("");
 
-  els.accountsEmpty.style.display = accounts.length ? "none" : "block";
+  setTableVisible(els.accountsTableBody, accounts.length > 0);
+  if (accounts.length) {
+    hideEmptyState(els.accountsEmpty);
+  } else if (!state.firms.length) {
+    showEmptyState(
+      els.accountsEmpty,
+      "Primero crea una firm",
+      "Las cuentas necesitan una firm asociada para que el dashboard pueda agrupar los resultados.",
+      "Nueva firm",
+      "add-firm"
+    );
+  } else if (!state.accounts.length) {
+    showEmptyState(
+      els.accountsEmpty,
+      "Todavia no hay cuentas",
+      "Anade la primera cuenta para seguir su estado, coste y retiradas.",
+      "Nueva cuenta",
+      "add-account"
+    );
+  } else {
+    showEmptyState(
+      els.accountsEmpty,
+      "Sin cuentas con esos filtros",
+      "Prueba con otra firm, otro estado o limpia la busqueda.",
+      "Limpiar filtros",
+      "reset-account-filters",
+      "rotate-ccw"
+    );
+  }
   refreshIcons();
 }
 
@@ -1017,8 +1119,66 @@ function renderTransactionsTable() {
     })
     .join("");
 
-  els.transactionsEmpty.style.display = transactions.length ? "none" : "block";
+  setTableVisible(els.transactionsTableBody, transactions.length > 0);
+  if (transactions.length) {
+    hideEmptyState(els.transactionsEmpty);
+  } else if (!state.firms.length) {
+    showEmptyState(
+      els.transactionsEmpty,
+      "Primero crea una firm",
+      "Los movimientos se agrupan por firm para que el capital y el ROI salgan correctamente.",
+      "Nueva firm",
+      "add-firm"
+    );
+  } else if (!state.transactions.length) {
+    showEmptyState(
+      els.transactionsEmpty,
+      "Todavia no hay movimientos",
+      "Registra compras, resets, fees o payouts para alimentar el dashboard.",
+      "Nuevo movimiento",
+      "add-transaction"
+    );
+  } else {
+    showEmptyState(
+      els.transactionsEmpty,
+      "Sin movimientos con esos filtros",
+      "Ajusta la firm, el tipo, las fechas o la busqueda para ver mas resultados.",
+      "Limpiar filtros",
+      "reset-transaction-filters",
+      "rotate-ccw"
+    );
+  }
   refreshIcons();
+}
+
+function setTableVisible(tableBody, isVisible) {
+  const tableWrap = tableBody?.closest(".table-wrap");
+  if (tableWrap) {
+    tableWrap.hidden = !isVisible;
+  }
+}
+
+function showEmptyState(element, title, text, actionLabel = "", action = "", icon = "plus") {
+  if (!element) return;
+  const button = action
+    ? `<button class="secondary-button compact-button" type="button" data-empty-action="${escapeHtml(action)}">
+        <i data-lucide="${escapeHtml(icon)}"></i>
+        <span>${escapeHtml(actionLabel)}</span>
+      </button>`
+    : "";
+
+  element.innerHTML = `
+    <strong>${escapeHtml(title)}</strong>
+    <span>${escapeHtml(text)}</span>
+    ${button}
+  `;
+  element.style.display = "grid";
+}
+
+function hideEmptyState(element) {
+  if (!element) return;
+  element.style.display = "none";
+  element.innerHTML = "";
 }
 
 function drawCharts(summary) {

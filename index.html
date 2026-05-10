@@ -111,6 +111,10 @@
           <div>
             <p class="eyebrow" id="currentDateLabel"></p>
             <h1 id="pageTitle">Panel</h1>
+            <div class="sync-status" id="syncStatus" role="status" aria-live="polite" hidden>
+              <i data-lucide="loader-circle"></i>
+              <span id="syncStatusText">Sincronizando datos...</span>
+            </div>
           </div>
           <div class="topbar-actions">
             <button class="theme-toggle" id="themeToggleButton" type="button" aria-label="Cambiar a modo oscuro" title="Cambiar tema">
@@ -274,7 +278,7 @@
                 <tbody id="firmsTableBody"></tbody>
               </table>
             </div>
-            <p class="empty-state" id="firmsEmpty">No hay firms registradas.</p>
+            <div class="empty-state" id="firmsEmpty">No hay firms registradas.</div>
           </div>
         </section>
 
@@ -329,7 +333,7 @@
                 <tbody id="accountsTableBody"></tbody>
               </table>
             </div>
-            <p class="empty-state" id="accountsEmpty">No hay cuentas registradas.</p>
+            <div class="empty-state" id="accountsEmpty">No hay cuentas registradas.</div>
           </div>
         </section>
 
@@ -388,7 +392,7 @@
                 <tbody id="transactionsTableBody"></tbody>
               </table>
             </div>
-            <p class="empty-state" id="transactionsEmpty">No hay movimientos registrados.</p>
+            <div class="empty-state" id="transactionsEmpty">No hay movimientos registrados.</div>
           </div>
         </section>
       </main>
