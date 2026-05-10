@@ -113,6 +113,9 @@ function bindElements() {
     "dashboardToFilter",
     "dashboardResetFilters",
     "dashboardPeriodHint",
+    "expenseBreakdownList",
+    "accountBreakdownList",
+    "recentTransactionsList",
     "monthExpenses",
     "monthIncome",
     "monthNet",
@@ -1048,6 +1051,7 @@ function getSummary(transactionsSource = state.transactions, accountsSource = st
   ).length;
 
   return {
+    accounts: accountsSource,
     transactions,
     expenses,
     income,
@@ -1086,6 +1090,7 @@ function renderDashboard() {
   els.monthNet.textContent = formatMoney(summary.net);
   els.monthNet.className = summary.net >= 0 ? "amount positive" : "amount negative";
 
+  renderDashboardBreakdowns(summary);
   drawCharts(summary);
 }
 
@@ -1097,6 +1102,156 @@ function isDashboardFiltered(filters) {
     Boolean(filters.from) ||
     Boolean(filters.to)
   );
+}
+
+function renderDashboardBreakdowns(summary) {
+  renderExpenseBreakdown(summary);
+  renderAccountBreakdown(summary);
+  renderRecentTransactions(summary);
+}
+
+function renderExpenseBreakdown(summary) {
+  const rows = groupBy(summary.transactions.filter((tx) => tx.kind === "expense"), (tx) => tx.category)
+    .map(([category, transactions]) => {
+      const total = sum(transactions.map((tx) => tx.amount));
+      return {
+        category,
+        count: transactions.length,
+        label: categoryLabels[category] || category,
+        percent: summary.expenses > 0 ? (total / summary.expenses) * 100 : 0,
+        total,
+      };
+    })
+    .sort((a, b) => b.total - a.total);
+
+  if (!rows.length) {
+    renderInsightEmpty(els.expenseBreakdownList, "Sin gastos en el filtro");
+    return;
+  }
+
+  els.expenseBreakdownList.innerHTML = rows
+    .map(
+      (row) => `
+        <div class="insight-row">
+          <div class="insight-main">
+            <div class="insight-title-line">
+              <strong>${escapeHtml(row.label)}</strong>
+              <span>${formatPercent(row.percent)}</span>
+            </div>
+            <div class="insight-bar" style="--share: ${clamp(row.percent, 2, 100)}%">
+              <i></i>
+            </div>
+            <span>${row.count} ${row.count === 1 ? "movimiento" : "movimientos"}</span>
+          </div>
+          <b class="amount negative">${formatMoney(row.total)}</b>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function renderAccountBreakdown(summary) {
+  const accountRows = summary.accounts.map((account) => {
+    const transactions = summary.transactions.filter((tx) => tx.accountId === account.id);
+    return accountBreakdownRow(account.name, getFirm(account.firmId)?.name || "Sin firm", transactions);
+  });
+  const looseTransactions = summary.transactions.filter((tx) => !tx.accountId);
+  const rows = [
+    ...accountRows,
+    ...(looseTransactions.length ? [accountBreakdownRow("Sin cuenta", "Movimientos sin cuenta concreta", looseTransactions)] : []),
+  ]
+    .filter((row) => row.expenses > 0 || row.income > 0)
+    .sort((a, b) => b.net - a.net)
+    .slice(0, 6);
+
+  if (!rows.length) {
+    renderInsightEmpty(els.accountBreakdownList, "Sin movimientos por cuenta en el filtro");
+    return;
+  }
+
+  els.accountBreakdownList.innerHTML = rows
+    .map(
+      (row) => `
+        <div class="insight-row">
+          <div class="insight-main">
+            <div class="insight-title-line">
+              <strong>${escapeHtml(row.name)}</strong>
+              <span>${formatPercent(row.roi)}</span>
+            </div>
+            <span>${escapeHtml(row.meta)}</span>
+            <div class="insight-split">
+              <span>Gasto ${formatMoney(row.expenses)}</span>
+              <span>Retiros ${formatMoney(row.income)}</span>
+            </div>
+          </div>
+          <b class="amount ${row.net >= 0 ? "positive" : "negative"}">${formatMoney(row.net)}</b>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function accountBreakdownRow(name, meta, transactions) {
+  const expenses = sum(transactions.filter((tx) => tx.kind === "expense").map((tx) => tx.amount));
+  const income = sum(transactions.filter((tx) => tx.kind === "income").map((tx) => tx.amount));
+  const net = income - expenses;
+  return {
+    expenses,
+    income,
+    meta,
+    name,
+    net,
+    roi: expenses > 0 ? (net / expenses) * 100 : 0,
+  };
+}
+
+function renderRecentTransactions(summary) {
+  const rows = summary.transactions
+    .slice()
+    .sort((a, b) => {
+      const byDate = (b.date || "").localeCompare(a.date || "");
+      return byDate || (b.createdAt || "").localeCompare(a.createdAt || "");
+    })
+    .slice(0, 6);
+
+  if (!rows.length) {
+    renderInsightEmpty(els.recentTransactionsList, "Sin movimientos en el filtro");
+    return;
+  }
+
+  els.recentTransactionsList.innerHTML = rows
+    .map((tx) => {
+      const firm = getFirm(resolveFirmId(tx));
+      const account = getAccount(tx.accountId);
+      const signed = tx.kind === "income" ? tx.amount : -tx.amount;
+      return `
+        <div class="insight-row insight-row-transaction">
+          <span class="badge ${tx.kind}">${tx.kind === "income" ? "Retiro" : "Gasto"}</span>
+          <div class="insight-main">
+            <strong>${escapeHtml(categoryLabels[tx.category] || tx.category)}</strong>
+            <span>${formatDate(tx.date)} - ${escapeHtml(firm?.name || "Sin firm")} - ${escapeHtml(account?.name || "Sin cuenta")}</span>
+          </div>
+          <b class="amount ${signed >= 0 ? "positive" : "negative"}">${formatMoney(signed)}</b>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderInsightEmpty(element, message) {
+  element.innerHTML = `<div class="insight-empty">${escapeHtml(message)}</div>`;
+}
+
+function groupBy(items, getKey) {
+  const grouped = new Map();
+  items.forEach((item) => {
+    const key = getKey(item);
+    if (!grouped.has(key)) {
+      grouped.set(key, []);
+    }
+    grouped.get(key).push(item);
+  });
+  return [...grouped.entries()];
 }
 
 function renderFirmsTable() {

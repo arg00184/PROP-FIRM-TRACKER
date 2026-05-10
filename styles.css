@@ -986,6 +986,13 @@ h2 {
   gap: 14px;
 }
 
+.dashboard-insights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
 .panel {
   min-width: 0;
   padding: 20px;
@@ -1163,6 +1170,107 @@ canvas {
   color: var(--text);
   overflow-wrap: anywhere;
   text-align: right;
+}
+
+/* ============= DASHBOARD INSIGHTS ============= */
+
+.insight-panel {
+  min-height: 310px;
+}
+
+.insight-list {
+  display: grid;
+}
+
+.insight-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.insight-row:first-child {
+  padding-top: 0;
+}
+
+.insight-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.insight-row-transaction {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.insight-main {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.insight-main strong,
+.insight-title-line strong {
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.insight-main span,
+.insight-title-line span,
+.insight-split span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.insight-title-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.insight-title-line span {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.insight-bar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.insight-bar i {
+  display: block;
+  width: var(--share);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--red);
+}
+
+.insight-split {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.insight-empty {
+  min-height: 164px;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
 }
 
 /* ============= FILTERS ============= */
@@ -1663,6 +1771,14 @@ tbody tr:hover {
   .dashboard-grid {
     grid-template-columns: 1fr;
   }
+
+  .dashboard-insights {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-insights .insight-panel:last-child {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 840px) {
@@ -1770,6 +1886,14 @@ tbody tr:hover {
   .dashboard-filters,
   .filters-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-insights {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-insights .insight-panel:last-child {
+    grid-column: auto;
   }
 }
 
@@ -1983,5 +2107,14 @@ tbody tr:hover {
 
   .chart-legend span {
     padding-inline: 8px;
+  }
+
+  .insight-row-transaction {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .insight-row-transaction .badge {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 }
