@@ -32,10 +32,38 @@ const statusLabels = {
   closed: "Cerrada",
 };
 
+const journalSessionLabels = {
+  "trading-day": "Sesion trading",
+  evaluation: "Evaluacion",
+  funded: "Fondeada",
+  "payout-day": "Payout day",
+  "news-day": "News day",
+  review: "Revision",
+  other: "Otro",
+};
+
+const journalResultLabels = {
+  good: "Buen dia",
+  neutral: "Neutral",
+  bad: "Mal dia",
+};
+
+const journalEmotionLabels = {
+  calm: "Calmado",
+  focused: "Enfocado",
+  anxious: "Ansioso",
+  impatient: "Impaciente",
+  fomo: "FOMO",
+  revenge: "Revenge",
+  tired: "Cansado",
+  other: "Otro",
+};
+
 const defaultState = {
   firms: [],
   accounts: [],
   transactions: [],
+  journalEntries: [],
 };
 
 let state = loadState();
@@ -44,6 +72,8 @@ let currentSession = null;
 let currentUser = null;
 let cloudLoading = false;
 let authMode = "login";
+let journalCalendarMonth = today().slice(0, 7);
+let journalSelectedDate = "";
 const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const NET_CHART_MIN_VISIBLE_POINTS = 6;
 const NET_CHART_PAN_STEP = 0.12;
@@ -87,7 +117,6 @@ function bindElements() {
     "authPassword",
     "authTitle",
     "authIntro",
-    "authGoogleButton",
     "authLoginButton",
     "authSwitchText",
     "authSignupButton",
@@ -126,9 +155,19 @@ function bindElements() {
     "firmsTableBody",
     "accountsTableBody",
     "transactionsTableBody",
+    "journalCalendarGrid",
+    "journalCalendarMonth",
+    "journalCalendarPrev",
+    "journalCalendarNext",
+    "journalCalendarToday",
+    "journalCalendarSummary",
+    "journalSelectedDateLabel",
+    "journalClearDateButton",
+    "journalEntriesList",
     "firmsEmpty",
     "accountsEmpty",
     "transactionsEmpty",
+    "journalEmpty",
     "accountFirmFilter",
     "accountStatusFilter",
     "accountSearch",
@@ -137,6 +176,10 @@ function bindElements() {
     "transactionFromFilter",
     "transactionToFilter",
     "transactionSearch",
+    "journalFirmFilter",
+    "journalAccountFilter",
+    "journalPeriodFilter",
+    "journalSearch",
     "firmDialog",
     "firmForm",
     "firmDialogTitle",
@@ -165,6 +208,21 @@ function bindElements() {
     "transactionFirm",
     "transactionAccount",
     "transactionNote",
+    "journalDialog",
+    "journalForm",
+    "journalDialogTitle",
+    "journalId",
+    "journalDate",
+    "journalSessionType",
+    "journalFirm",
+    "journalAccount",
+    "journalTitle",
+    "journalResult",
+    "journalEmotion",
+    "journalDiscipline",
+    "journalPnl",
+    "journalNotes",
+    "journalLesson",
     "confirmDialog",
     "confirmTitle",
     "confirmMessage",
@@ -186,7 +244,6 @@ function bindEvents() {
     event.preventDefault();
     submitAuthForm();
   });
-  els.authGoogleButton.addEventListener("click", signInWithGoogle);
   els.authSignupButton.addEventListener("click", toggleAuthMode);
   els.logoutButton.addEventListener("click", signOut);
 
@@ -200,6 +257,7 @@ function bindEvents() {
   document.getElementById("addAccountButtonInline").addEventListener("click", () => openAccountDialog());
   document.getElementById("addTransactionButton").addEventListener("click", () => openTransactionDialog());
   document.getElementById("addTransactionButtonInline").addEventListener("click", () => openTransactionDialog());
+  document.getElementById("addJournalButtonInline").addEventListener("click", () => openJournalDialog());
   els.themeToggleButton.addEventListener("click", toggleTheme);
   els.dashboardFirmFilter.addEventListener("input", () => {
     fillDashboardAccountFilter();
@@ -230,6 +288,7 @@ function bindEvents() {
   els.firmForm.addEventListener("submit", saveFirmFromForm);
   els.accountForm.addEventListener("submit", saveAccountFromForm);
   els.transactionForm.addEventListener("submit", saveTransactionFromForm);
+  els.journalForm.addEventListener("submit", saveJournalFromForm);
 
   els.transactionKind.addEventListener("change", () => {
     fillTransactionCategories(els.transactionKind.value, els.transactionCategory.value);
@@ -242,6 +301,16 @@ function bindEvents() {
     if (account) {
       els.transactionFirm.value = account.firmId;
       fillAccountSelect(els.transactionAccount, account.firmId, true, account.id);
+    }
+  });
+  els.journalFirm.addEventListener("change", () => {
+    fillAccountSelect(els.journalAccount, els.journalFirm.value, true);
+  });
+  els.journalAccount.addEventListener("change", () => {
+    const account = getAccount(els.journalAccount.value);
+    if (account) {
+      els.journalFirm.value = account.firmId;
+      fillAccountSelect(els.journalAccount, account.firmId, true, account.id);
     }
   });
 
@@ -259,9 +328,23 @@ function bindEvents() {
     els[id].addEventListener("input", renderTransactionsTable);
   });
 
+  els.journalFirmFilter.addEventListener("input", () => {
+    fillJournalAccountFilter();
+    renderJournalApp();
+  });
+  ["journalAccountFilter", "journalPeriodFilter", "journalSearch"].forEach((id) => {
+    els[id].addEventListener("input", renderJournalApp);
+  });
+  els.journalCalendarPrev.addEventListener("click", () => shiftJournalCalendarMonth(-1));
+  els.journalCalendarNext.addEventListener("click", () => shiftJournalCalendarMonth(1));
+  els.journalCalendarToday.addEventListener("click", resetJournalCalendarMonth);
+  els.journalClearDateButton.addEventListener("click", clearJournalSelectedDate);
+
   els.firmsTableBody.addEventListener("click", handleTableAction);
   els.accountsTableBody.addEventListener("click", handleTableAction);
   els.transactionsTableBody.addEventListener("click", handleTableAction);
+  els.journalCalendarGrid.addEventListener("click", handleTableAction);
+  els.journalEntriesList.addEventListener("click", handleTableAction);
 
   document.getElementById("exportJsonButton").addEventListener("click", exportJson);
   document.getElementById("exportCsvButton").addEventListener("click", exportCsv);
@@ -462,7 +545,6 @@ function setAppAccess(isAuthenticated) {
 }
 
 function setAuthBusy(isBusy, message = "") {
-  els.authGoogleButton.disabled = isBusy;
   els.authLoginButton.disabled = isBusy;
   els.authSignupButton.disabled = isBusy;
   els.authMessage.textContent = message;
@@ -514,7 +596,7 @@ function setAuthMode(mode) {
   els.authTitle.textContent = isSignup ? "Crear cuenta" : "";
   els.authIntro.textContent = isSignup
     ? "Crea tu acceso para guardar tus datos en la nube."
-    : "Accede para sincronizar tus firms, cuentas y movimientos.";
+    : "Accede para sincronizar tus firms, cuentas, movimientos y journal.";
   els.authNameField.hidden = !isSignup;
   els.authName.disabled = !isSignup;
   els.authName.required = isSignup;
@@ -577,27 +659,6 @@ async function signUp() {
   els.authMessage.textContent = "Cuenta creada. Entrando...";
 }
 
-async function signInWithGoogle() {
-  if (!supabaseClient) return;
-  if (window.location.protocol === "file:") {
-    els.authMessage.textContent = "Google requiere abrir trazza desde Vercel o localhost.";
-    return;
-  }
-
-  setAuthBusy(true, "Abriendo Google...");
-  const { error } = await supabaseClient.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: `${window.location.origin}${window.location.pathname}`,
-    },
-  });
-
-  if (error) {
-    setAuthBusy(false);
-    els.authMessage.textContent = error.message;
-  }
-}
-
 async function signOut() {
   if (!supabaseClient) return;
   const { error } = await supabaseClient.auth.signOut();
@@ -613,10 +674,11 @@ async function loadCloudState() {
   setSyncStatus("loading", "Sincronizando datos...");
 
   try {
-    const [firmsResult, accountsResult, transactionsResult] = await Promise.all([
+    const [firmsResult, accountsResult, transactionsResult, journalResult] = await Promise.all([
       supabaseClient.from("firms").select("*").order("name", { ascending: true }),
       supabaseClient.from("accounts").select("*").order("created_at", { ascending: true }),
       supabaseClient.from("transactions").select("*").order("date", { ascending: true }),
+      fetchJournalEntries(),
     ]);
 
     [firmsResult, accountsResult, transactionsResult].forEach(throwIfSupabaseError);
@@ -625,6 +687,7 @@ async function loadCloudState() {
       firms: (firmsResult.data || []).map(fromDbFirm),
       accounts: (accountsResult.data || []).map(fromDbAccount),
       transactions: (transactionsResult.data || []).map(fromDbTransaction),
+      journalEntries: journalResult,
     };
     refreshAll();
     updateMigrationButton();
@@ -638,6 +701,44 @@ async function loadCloudState() {
       setSyncStatus("idle");
     }
   }
+}
+
+async function fetchJournalEntries() {
+  const result = await supabaseClient.from("journal_entries").select("*").order("date", { ascending: false });
+  if (result.error) {
+    if (isMissingJournalTableError(result.error)) {
+      toast("Crea la tabla journal_entries en Supabase para activar el journal.");
+      return [];
+    }
+    throw result.error;
+  }
+  return (result.data || []).map(fromDbJournalEntry);
+}
+
+function isMissingJournalTableError(error) {
+  const message = String(error?.message || "");
+  return (
+    error?.code === "42P01" ||
+    error?.code === "PGRST205" ||
+    (message.includes("journal_entries") && message.includes("does not exist")) ||
+    message.includes("Could not find the table")
+  );
+}
+
+function isJournalSetupError(error) {
+  const message = String(error?.message || "");
+  return isMissingJournalTableError(error) || error?.code === "PGRST204" || message.includes("pnl");
+}
+
+function handleJournalTableResult(result, requireTable = false) {
+  if (result.error && isJournalSetupError(result.error)) {
+    if (requireTable) {
+      throw new Error("Ejecuta supabase-journal.sql en Supabase para actualizar el journal con P&L.");
+    }
+    return false;
+  }
+  throwIfSupabaseError(result);
+  return true;
 }
 
 function getInitialTheme() {
@@ -697,6 +798,7 @@ function loadState() {
       firms: Array.isArray(parsed.firms) ? parsed.firms : [],
       accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
       transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
+      journalEntries: Array.isArray(parsed.journalEntries) ? parsed.journalEntries : [],
     };
   } catch {
     return structuredClone(defaultState);
@@ -752,6 +854,25 @@ function fromDbTransaction(row) {
   };
 }
 
+function fromDbJournalEntry(row) {
+  return {
+    id: row.id,
+    date: row.date,
+    firmId: row.firm_id || "",
+    accountId: row.account_id || "",
+    title: row.title || "",
+    sessionType: row.session_type || "trading-day",
+    result: row.result || "neutral",
+    emotion: row.emotion || "focused",
+    discipline: Number(row.discipline || 3),
+    pnl: Number(row.pnl || 0),
+    notes: row.notes || "",
+    lesson: row.lesson || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || row.created_at,
+  };
+}
+
 function firmToDb(firm) {
   return {
     id: firm.id,
@@ -789,6 +910,25 @@ function transactionToDb(transaction) {
   };
 }
 
+function journalEntryToDb(entry) {
+  return {
+    id: entry.id,
+    user_id: currentUser.id,
+    firm_id: entry.firmId || null,
+    account_id: entry.accountId || null,
+    date: entry.date,
+    title: entry.title,
+    session_type: entry.sessionType,
+    result: entry.result,
+    emotion: entry.emotion,
+    discipline: entry.discipline,
+    pnl: Number(entry.pnl || 0),
+    notes: entry.notes || null,
+    lesson: entry.lesson || null,
+    updated_at: entry.updatedAt || nowIso(),
+  };
+}
+
 function refreshAll() {
   fillFirmSelects();
   updateDashboardDateInputs();
@@ -797,6 +937,7 @@ function refreshAll() {
   renderFirmsTable();
   renderAccountsTable();
   renderTransactionsTable();
+  renderJournalApp();
   refreshIcons();
 }
 
@@ -833,6 +974,7 @@ function setActiveSection(section) {
     firms: "Firms",
     accounts: "Cuentas",
     transactions: "Movimientos",
+    journal: "Journal",
   };
 
   document.querySelectorAll(".section-panel").forEach((panel) => {
@@ -854,8 +996,10 @@ function handleEmptyStateAction(event) {
     "add-firm": () => openFirmDialog(),
     "add-account": () => openAccountDialog(),
     "add-transaction": () => openTransactionDialog(),
+    "add-journal": () => openJournalDialog(),
     "reset-account-filters": resetAccountFilters,
     "reset-transaction-filters": resetTransactionFilters,
+    "reset-journal-filters": resetJournalFilters,
   };
 
   actions[button.dataset.emptyAction]?.();
@@ -877,6 +1021,40 @@ function resetTransactionFilters() {
   renderTransactionsTable();
 }
 
+function resetJournalFilters() {
+  els.journalFirmFilter.value = "all";
+  fillJournalAccountFilter();
+  els.journalAccountFilter.value = "all";
+  els.journalPeriodFilter.value = "all";
+  els.journalSearch.value = "";
+  journalSelectedDate = "";
+  renderJournalApp();
+}
+
+function shiftJournalCalendarMonth(offset) {
+  const date = parseLocalDate(`${journalCalendarMonth}-01`);
+  date.setMonth(date.getMonth() + offset);
+  journalCalendarMonth = dateToIsoDate(date).slice(0, 7);
+  renderJournalCalendar();
+}
+
+function resetJournalCalendarMonth() {
+  journalCalendarMonth = today().slice(0, 7);
+  renderJournalCalendar();
+}
+
+function selectJournalDate(date) {
+  if (!isValidIsoDate(date)) return;
+  journalSelectedDate = date;
+  els.journalPeriodFilter.value = "all";
+  renderJournalApp();
+}
+
+function clearJournalSelectedDate() {
+  journalSelectedDate = "";
+  renderJournalApp();
+}
+
 function fillFirmSelects() {
   const firmOptions = state.firms
     .slice()
@@ -889,9 +1067,12 @@ function fillFirmSelects() {
   setSelectOptions(els.dashboardFirmFilter, filterOptions, "all");
   setSelectOptions(els.accountFirmFilter, filterOptions, "all");
   setSelectOptions(els.transactionFirmFilter, filterOptions, "all");
+  setSelectOptions(els.journalFirmFilter, filterOptions, "all");
   setSelectOptions(els.accountFirm, firmOptions || `<option value="">Crea una firm primero</option>`, firstFirmId);
   setSelectOptions(els.transactionFirm, firmOptions || `<option value="">Crea una firm primero</option>`, firstFirmId);
+  setSelectOptions(els.journalFirm, firmOptions || `<option value="">Crea una firm primero</option>`, firstFirmId);
   fillDashboardAccountFilter();
+  fillJournalAccountFilter();
 }
 
 function setSelectOptions(select, optionsHtml, fallbackValue = "") {
@@ -919,6 +1100,18 @@ function fillDashboardAccountFilter() {
     .join("");
 
   setSelectOptions(els.dashboardAccountFilter, `<option value="all">Todas</option>${accountOptions}`, "all");
+}
+
+function fillJournalAccountFilter() {
+  if (!els.journalAccountFilter) return;
+  const firmId = els.journalFirmFilter.value || "all";
+  const accountOptions = state.accounts
+    .filter((account) => firmId === "all" || account.firmId === firmId)
+    .sort((a, b) => a.name.localeCompare(b.name, "es"))
+    .map((account) => `<option value="${escapeHtml(account.id)}">${escapeHtml(account.name)}</option>`)
+    .join("");
+
+  setSelectOptions(els.journalAccountFilter, `<option value="all">Todas</option>${accountOptions}`, "all");
 }
 
 function fillAccountSelect(select, firmId, includeEmpty, selectedId = "") {
@@ -954,6 +1147,17 @@ function getDashboardFilters() {
 }
 
 function getDashboardDateRange(period) {
+  if (period === "custom") {
+    return {
+      from: els.dashboardFromFilter?.value || "",
+      to: els.dashboardToFilter?.value || "",
+    };
+  }
+
+  return getPeriodDateRange(period);
+}
+
+function getPeriodDateRange(period) {
   const end = today();
 
   if (period === "current-month") {
@@ -967,12 +1171,6 @@ function getDashboardDateRange(period) {
   }
   if (period === "year") {
     return { from: `${end.slice(0, 4)}-01-01`, to: end };
-  }
-  if (period === "custom") {
-    return {
-      from: els.dashboardFromFilter?.value || "",
-      to: els.dashboardToFilter?.value || "",
-    };
   }
 
   return { from: "", to: "" };
@@ -1466,6 +1664,207 @@ function renderTransactionsTable() {
   refreshIcons();
 }
 
+function renderJournalApp() {
+  renderJournalCalendar();
+  renderJournalEntries();
+}
+
+function getFilteredJournalEntries(options = {}) {
+  const includePeriod = options.includePeriod !== false;
+  const includeSelectedDate = options.includeSelectedDate !== false;
+  const firmFilter = els.journalFirmFilter.value || "all";
+  const accountFilter = els.journalAccountFilter.value || "all";
+  const period = els.journalPeriodFilter.value || "all";
+  const { from, to } = includePeriod ? getPeriodDateRange(period) : { from: "", to: "" };
+  const search = normalize(els.journalSearch.value);
+
+  return state.journalEntries
+    .filter((entry) => firmFilter === "all" || entry.firmId === firmFilter)
+    .filter((entry) => accountFilter === "all" || entry.accountId === accountFilter)
+    .filter((entry) => !from || entry.date >= from)
+    .filter((entry) => !to || entry.date <= to)
+    .filter((entry) => !includeSelectedDate || !journalSelectedDate || entry.date === journalSelectedDate)
+    .filter((entry) => {
+      if (!search) return true;
+      const firm = getFirm(entry.firmId);
+      const account = getAccount(entry.accountId);
+      const text = [
+        entry.title,
+        entry.notes,
+        entry.lesson,
+        entry.pnl,
+        journalSessionLabels[entry.sessionType],
+        journalResultLabels[entry.result],
+        journalEmotionLabels[entry.emotion],
+        firm?.name,
+        account?.name,
+      ].join(" ");
+      return normalize(text).includes(search);
+    });
+}
+
+function renderJournalCalendar() {
+  const monthStart = parseLocalDate(`${journalCalendarMonth}-01`);
+  const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+  const startOffset = (monthStart.getDay() + 6) % 7;
+  const cursor = new Date(monthStart);
+  cursor.setDate(cursor.getDate() - startOffset);
+  const entries = getFilteredJournalEntries({ includePeriod: false, includeSelectedDate: false });
+  const entriesByDate = new Map();
+
+  entries.forEach((entry) => {
+    if (!entriesByDate.has(entry.date)) entriesByDate.set(entry.date, []);
+    entriesByDate.get(entry.date).push(entry);
+  });
+
+  const header = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"]
+    .map((day) => `<div class="journal-calendar-head">${day}</div>`)
+    .join("");
+  const rows = [];
+  const monthEntries = [];
+
+  while (cursor <= monthEnd || rows.length === 0) {
+    const weekCells = [];
+    const weekEntries = [];
+
+    for (let day = 0; day < 7; day += 1) {
+      const iso = dateToIsoDate(cursor);
+      const dayEntries = entriesByDate.get(iso) || [];
+      const dayPnl = sum(dayEntries.map((entry) => entry.pnl));
+      const isCurrentMonth = cursor.getMonth() === monthStart.getMonth();
+      const className = [
+        "journal-calendar-day",
+        isCurrentMonth ? "is-current" : "is-adjacent",
+        dayEntries.length ? "has-entries" : "",
+        journalSelectedDate === iso ? "is-selected" : "",
+        pnlToneClass(dayPnl),
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      if (isCurrentMonth) monthEntries.push(...dayEntries);
+      weekEntries.push(...dayEntries);
+      weekCells.push(`
+        <button class="${className}" type="button" data-action="select-journal-day" data-date="${iso}">
+          <span class="journal-calendar-date">${cursor.getDate()}</span>
+          ${dayEntries.length ? `<strong>${formatSignedMoney(dayPnl)}</strong>` : "<strong></strong>"}
+          ${dayEntries.length ? `<small>${dayEntries.length} ${dayEntries.length === 1 ? "entrada" : "entradas"}</small>` : "<small></small>"}
+        </button>
+      `);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    const weekPnl = sum(weekEntries.map((entry) => entry.pnl));
+    rows.push(`
+      ${weekCells.join("")}
+      <div class="journal-calendar-week-total ${pnlToneClass(weekPnl)}">
+        <span>Semana</span>
+        <strong>${formatSignedMoney(weekPnl)}</strong>
+        <small>${weekEntries.length} ${weekEntries.length === 1 ? "entrada" : "entradas"}</small>
+      </div>
+    `);
+  }
+
+  const monthPnl = sum(monthEntries.map((entry) => entry.pnl));
+  const activeDays = new Set(monthEntries.map((entry) => entry.date));
+  const winningDays = [...activeDays].filter((date) => sum((entriesByDate.get(date) || []).map((entry) => entry.pnl)) > 0);
+  els.journalCalendarMonth.textContent = formatMonthLabel(journalCalendarMonth);
+  els.journalCalendarSummary.textContent = monthEntries.length
+    ? `${formatSignedMoney(monthPnl)} este mes - ${winningDays.length}/${activeDays.size} dias positivos - ${monthEntries.length} entradas`
+    : "Sin entradas en este mes con los filtros actuales.";
+  els.journalCalendarGrid.innerHTML = `${header}<div class="journal-calendar-head weekly">Semana</div>${rows.join("")}`;
+  els.journalSelectedDateLabel.hidden = !journalSelectedDate;
+  els.journalClearDateButton.hidden = !journalSelectedDate;
+  els.journalSelectedDateLabel.textContent = journalSelectedDate ? `Dia seleccionado: ${formatDate(journalSelectedDate)}` : "";
+  refreshIcons();
+}
+
+function renderJournalEntries() {
+  const entries = getFilteredJournalEntries()
+    .sort((a, b) => {
+      const byDate = (b.date || "").localeCompare(a.date || "");
+      return byDate || (b.createdAt || "").localeCompare(a.createdAt || "");
+    });
+
+  els.journalEntriesList.innerHTML = entries.map(journalCardHtml).join("");
+  els.journalEntriesList.hidden = entries.length === 0;
+
+  if (entries.length) {
+    hideEmptyState(els.journalEmpty);
+  } else if (!state.firms.length) {
+    showEmptyState(
+      els.journalEmpty,
+      "Primero crea una firm",
+      "El journal se organiza por firm para que puedas revisar cada etapa con contexto.",
+      "Nueva firm",
+      "add-firm"
+    );
+  } else if (!state.journalEntries.length) {
+    showEmptyState(
+      els.journalEmpty,
+      "Todavia no hay entradas",
+      "Registra sesiones, decisiones y aprendizajes sin mezclarlo con los movimientos economicos.",
+      "Nueva entrada",
+      "add-journal"
+    );
+  } else {
+    showEmptyState(
+      els.journalEmpty,
+      "Sin entradas con esos filtros",
+      "Ajusta la firm, la cuenta, el periodo o la busqueda para ver mas resultados.",
+      "Limpiar filtros",
+      "reset-journal-filters",
+      "rotate-ccw"
+    );
+  }
+  refreshIcons();
+}
+
+function journalCardHtml(entry) {
+  const firm = getFirm(entry.firmId);
+  const account = getAccount(entry.accountId);
+  const result = journalResultLabels[entry.result] || entry.result;
+  const session = journalSessionLabels[entry.sessionType] || entry.sessionType;
+  const emotion = journalEmotionLabels[entry.emotion] || entry.emotion;
+  const discipline = clamp(Math.round(Number(entry.discipline || 3)), 1, 5);
+  const pnl = Number(entry.pnl || 0);
+  const notes = entry.notes
+    ? `<p class="journal-text">${escapeHtml(entry.notes)}</p>`
+    : "";
+  const lesson = entry.lesson
+    ? `<div class="journal-lesson"><span>Aprendizaje</span><p>${escapeHtml(entry.lesson)}</p></div>`
+    : "";
+
+  return `
+    <article class="journal-card">
+      <div class="journal-card-main">
+        <div class="journal-card-head">
+          <div>
+            <p class="journal-date">${formatDate(entry.date)}</p>
+            <h3>${escapeHtml(entry.title || "Entrada sin titulo")}</h3>
+          </div>
+          <div class="journal-card-stats">
+            <span class="journal-pnl ${pnlToneClass(pnl)}">${formatSignedMoney(pnl)}</span>
+            <span class="journal-score">Disciplina ${discipline}/5</span>
+          </div>
+        </div>
+        <div class="journal-tags">
+          <span class="badge journal-result-${escapeHtml(entry.result)}">${escapeHtml(result)}</span>
+          <span class="badge journal-session">${escapeHtml(session)}</span>
+          <span class="badge journal-emotion">${escapeHtml(emotion)}</span>
+        </div>
+        <p class="journal-meta">${escapeHtml(firm?.name || "Sin firm")} - ${escapeHtml(account?.name || "Sin cuenta concreta")}</p>
+        ${notes}
+        ${lesson}
+      </div>
+      <div class="row-actions">
+        ${actionButton("edit-journal", entry.id, "Editar", "pencil")}
+        ${actionButton("delete-journal", entry.id, "Eliminar", "trash-2")}
+      </div>
+    </article>
+  `;
+}
+
 function setTableVisible(tableBody, isVisible) {
   const tableWrap = tableBody?.closest(".table-wrap");
   if (tableWrap) {
@@ -1827,9 +2226,9 @@ function drawChartTooltip(ctx, canvas, x, y, title, rows, palette) {
   const horizontalPadding = 12;
   const rowGap = 21;
   const titleHeight = 28;
-  ctx.font = "600 12px Inter, sans-serif";
+  ctx.font = "600 12px system-ui, sans-serif";
   const titleWidth = ctx.measureText(title).width;
-  ctx.font = "12px Inter, sans-serif";
+  ctx.font = "12px system-ui, sans-serif";
   const rowWidth = Math.max(
     titleWidth,
     ...rows.map((row) => ctx.measureText(row.label).width + ctx.measureText(row.value).width + 48)
@@ -1849,7 +2248,7 @@ function drawChartTooltip(ctx, canvas, x, y, title, rows, palette) {
   ctx.stroke();
 
   ctx.fillStyle = palette.labelText;
-  ctx.font = "600 12px Inter, sans-serif";
+  ctx.font = "600 12px system-ui, sans-serif";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillText(title, left + horizontalPadding, top + 17);
@@ -1862,12 +2261,12 @@ function drawChartTooltip(ctx, canvas, x, y, title, rows, palette) {
     ctx.fill();
 
     ctx.fillStyle = palette.muted;
-    ctx.font = "12px Inter, sans-serif";
+    ctx.font = "12px system-ui, sans-serif";
     ctx.textAlign = "left";
     ctx.fillText(row.label, left + horizontalPadding + 14, rowY);
 
     ctx.fillStyle = palette.labelText;
-    ctx.font = "600 12px Inter, sans-serif";
+    ctx.font = "600 12px system-ui, sans-serif";
     ctx.textAlign = "right";
     ctx.fillText(row.value, left + width - horizontalPadding, rowY);
   });
@@ -1946,7 +2345,7 @@ function drawXAxisLabels(ctx, canvas, ticks, xFor, palette) {
   const pad = chartPadding(canvas);
   const size = chartSize(canvas);
   ctx.fillStyle = palette.muted;
-  ctx.font = "12px Inter, sans-serif";
+  ctx.font = "12px system-ui, sans-serif";
   ctx.textBaseline = "alphabetic";
 
   ticks.forEach((tick, tickIndex) => {
@@ -2060,7 +2459,7 @@ function drawMonthChart(transactions) {
     ctx.fill();
 
     ctx.fillStyle = palette.muted;
-    ctx.font = "12px Inter, sans-serif";
+    ctx.font = "12px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(item.label, center, size.height - 10);
   });
@@ -2117,7 +2516,7 @@ function drawGrid(ctx, canvas, min, max) {
   }
 
   ctx.fillStyle = palette.muted;
-  ctx.font = "11.5px Inter, sans-serif";
+  ctx.font = "11.5px system-ui, sans-serif";
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
   ctx.fillText(formatAxisMoney(max), pad.left - 8, top);
@@ -2128,7 +2527,7 @@ function drawGrid(ctx, canvas, min, max) {
 function drawChartLabel(ctx, canvas, label, x, y, align = "left") {
   const palette = chartPalette();
   const size = chartSize(canvas);
-  ctx.font = "12px Inter, sans-serif";
+  ctx.font = "12px system-ui, sans-serif";
   const width = ctx.measureText(label).width + 14;
   const height = 26;
   const left = align === "right" ? x - width : x;
@@ -2197,9 +2596,161 @@ function openTransactionDialog(transaction = null) {
   showDialog(els.transactionDialog);
 }
 
+function openJournalDialog(entry = null) {
+  if (!state.firms.length) {
+    openFirmDialog();
+    toast("Crea una firm antes de anadir entradas al journal.");
+    return;
+  }
+
+  fillFirmSelects();
+  els.journalForm.reset();
+  const account = getAccount(entry?.accountId);
+  const firmId = entry?.firmId || account?.firmId || state.firms[0].id;
+  els.journalId.value = entry?.id || "";
+  els.journalDate.value = entry?.date || today();
+  els.journalSessionType.value = entry?.sessionType || "trading-day";
+  els.journalFirm.value = firmId;
+  fillAccountSelect(els.journalAccount, firmId, true, entry?.accountId || "");
+  els.journalTitle.value = entry?.title || "";
+  els.journalResult.value = entry?.result || "neutral";
+  els.journalEmotion.value = entry?.emotion || "focused";
+  els.journalDiscipline.value = String(entry?.discipline || 3);
+  els.journalPnl.value = entry ? Number(entry.pnl || 0) : "";
+  els.journalNotes.value = entry?.notes || "";
+  els.journalLesson.value = entry?.lesson || "";
+  els.journalDialogTitle.textContent = entry ? "Editar entrada" : "Nueva entrada";
+  showDialog(els.journalDialog);
+}
+
+function clearFormValidity(form) {
+  form?.querySelectorAll("input, select, textarea").forEach((field) => {
+    field.setCustomValidity?.("");
+  });
+}
+
+function markInvalid(field, message) {
+  if (field) {
+    field.setCustomValidity?.(message);
+    field.reportValidity?.();
+    field.addEventListener?.("input", () => field.setCustomValidity?.(""), { once: true });
+    field.addEventListener?.("change", () => field.setCustomValidity?.(""), { once: true });
+    field.focus?.();
+  }
+  toast(message);
+  return false;
+}
+
+function isFormBusy(form) {
+  return form?.dataset.busy === "true";
+}
+
+function setFormBusy(form, isBusy) {
+  if (!form) return;
+  form.dataset.busy = isBusy ? "true" : "false";
+  form.querySelectorAll('button[type="submit"]').forEach((button) => {
+    button.disabled = isBusy;
+  });
+}
+
+function parsePositiveAmount(value) {
+  const text = String(value || "").trim().replace(",", ".");
+  if (!text) return Number.NaN;
+  return Number(text);
+}
+
+function parseSignedAmount(value) {
+  const text = String(value || "").trim().replace(",", ".");
+  if (!text) return 0;
+  return Number(text);
+}
+
+function isValidIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return false;
+  const date = parseLocalDate(value);
+  return dateToIsoDate(date) === value;
+}
+
+function validateFirm(firm, id) {
+  if (!firm.name) return markInvalid(els.firmName, "Pon un nombre para la firm.");
+  if (firm.name.length < 2) return markInvalid(els.firmName, "El nombre de la firm es demasiado corto.");
+  if (!["Futuros", "CFDs", "Mixta"].includes(firm.type)) {
+    return markInvalid(els.firmType, "Selecciona un tipo de firm valido.");
+  }
+  const duplicated = state.firms.some((item) => item.id !== id && normalize(item.name) === normalize(firm.name));
+  if (duplicated) return markInvalid(els.firmName, "Ya existe una firm con ese nombre.");
+  return true;
+}
+
+function validateAccount(account, id) {
+  if (!getFirm(account.firmId)) return markInvalid(els.accountFirm, "Selecciona una firm valida.");
+  if (!account.name) return markInvalid(els.accountName, "Pon un nombre para la cuenta.");
+  if (account.name.length < 2) return markInvalid(els.accountName, "El nombre de la cuenta es demasiado corto.");
+  if (!statusLabels[account.status]) return markInvalid(els.accountStatus, "Selecciona un estado valido.");
+  if (account.purchasedAt && !isValidIsoDate(account.purchasedAt)) {
+    return markInvalid(els.accountPurchasedAt, "La fecha de compra no es valida.");
+  }
+  if (account.purchasedAt && account.purchasedAt > today()) {
+    return markInvalid(els.accountPurchasedAt, "La fecha de compra no puede ser futura.");
+  }
+  const duplicated = state.accounts.some(
+    (item) =>
+      item.id !== id &&
+      item.firmId === account.firmId &&
+      normalize(item.name) === normalize(account.name)
+  );
+  if (duplicated) return markInvalid(els.accountName, "Ya hay una cuenta con ese nombre en esta firm.");
+  return true;
+}
+
+function validateTransaction(transaction, selectedAccountId, account) {
+  if (!isValidIsoDate(transaction.date)) return markInvalid(els.transactionDate, "La fecha del movimiento no es valida.");
+  if (transaction.date > today()) return markInvalid(els.transactionDate, "La fecha del movimiento no puede ser futura.");
+  if (!["expense", "income"].includes(transaction.kind)) {
+    return markInvalid(els.transactionKind, "Selecciona un tipo de movimiento valido.");
+  }
+  const validCategories = transaction.kind === "income" ? incomeCategories : expenseCategories;
+  if (!validCategories.includes(transaction.category)) {
+    return markInvalid(els.transactionCategory, "La categoria no corresponde con el tipo de movimiento.");
+  }
+  if (!Number.isFinite(transaction.amount) || transaction.amount <= 0) {
+    return markInvalid(els.transactionAmount, "El importe debe ser mayor que 0.");
+  }
+  if (!getFirm(transaction.firmId)) return markInvalid(els.transactionFirm, "Selecciona una firm valida.");
+  if (selectedAccountId && !account) return markInvalid(els.transactionAccount, "Selecciona una cuenta valida.");
+  if (account && account.firmId !== transaction.firmId) {
+    return markInvalid(els.transactionAccount, "La cuenta seleccionada no pertenece a esa firm.");
+  }
+  return true;
+}
+
+function validateJournalEntry(entry, selectedAccountId, account) {
+  if (!isValidIsoDate(entry.date)) return markInvalid(els.journalDate, "La fecha de la entrada no es valida.");
+  if (entry.date > today()) return markInvalid(els.journalDate, "La fecha de la entrada no puede ser futura.");
+  if (!journalSessionLabels[entry.sessionType]) {
+    return markInvalid(els.journalSessionType, "Selecciona un tipo de sesion valido.");
+  }
+  if (!getFirm(entry.firmId)) return markInvalid(els.journalFirm, "Selecciona una firm valida.");
+  if (selectedAccountId && !account) return markInvalid(els.journalAccount, "Selecciona una cuenta valida.");
+  if (account && account.firmId !== entry.firmId) {
+    return markInvalid(els.journalAccount, "La cuenta seleccionada no pertenece a esa firm.");
+  }
+  if (!entry.title) return markInvalid(els.journalTitle, "Pon un titulo para la entrada.");
+  if (entry.title.length < 3) return markInvalid(els.journalTitle, "El titulo es demasiado corto.");
+  if (!journalResultLabels[entry.result]) return markInvalid(els.journalResult, "Selecciona un resultado valido.");
+  if (!journalEmotionLabels[entry.emotion]) return markInvalid(els.journalEmotion, "Selecciona un estado mental valido.");
+  if (!Number.isInteger(entry.discipline) || entry.discipline < 1 || entry.discipline > 5) {
+    return markInvalid(els.journalDiscipline, "La disciplina debe estar entre 1 y 5.");
+  }
+  if (!Number.isFinite(entry.pnl)) return markInvalid(els.journalPnl, "El P&L debe ser un numero valido.");
+  return true;
+}
+
 async function saveFirmFromForm(event) {
   event.preventDefault();
   if (!currentUser) return toast("Inicia sesion para guardar.");
+  if (isFormBusy(els.firmForm)) return;
+  clearFormValidity(els.firmForm);
 
   const id = els.firmId.value || createId();
   const existing = state.firms.find((firm) => firm.id === id);
@@ -2212,8 +2763,9 @@ async function saveFirmFromForm(event) {
     updatedAt: nowIso(),
   };
 
-  if (!firm.name) return;
+  if (!validateFirm(firm, id)) return;
 
+  setFormBusy(els.firmForm, true);
   try {
     const result = await supabaseClient.from("firms").upsert(firmToDb(firm)).select().single();
     throwIfSupabaseError(result);
@@ -2231,12 +2783,16 @@ async function saveFirmFromForm(event) {
     toast("Firm guardada.");
   } catch (error) {
     toast(error.message || "No se pudo guardar la firm.");
+  } finally {
+    setFormBusy(els.firmForm, false);
   }
 }
 
 async function saveAccountFromForm(event) {
   event.preventDefault();
   if (!currentUser) return toast("Inicia sesion para guardar.");
+  if (isFormBusy(els.accountForm)) return;
+  clearFormValidity(els.accountForm);
 
   const id = els.accountId.value || createId();
   const existing = state.accounts.find((account) => account.id === id);
@@ -2252,8 +2808,9 @@ async function saveAccountFromForm(event) {
     updatedAt: nowIso(),
   };
 
-  if (!account.firmId || !account.name) return;
+  if (!validateAccount(account, id)) return;
 
+  setFormBusy(els.accountForm, true);
   try {
     const result = await supabaseClient.from("accounts").upsert(accountToDb(account)).select().single();
     throwIfSupabaseError(result);
@@ -2269,6 +2826,19 @@ async function saveAccountFromForm(event) {
         .update({ firm_id: savedAccount.firmId })
         .eq("account_id", id);
       throwIfSupabaseError(txUpdate);
+      if (state.journalEntries.some((entry) => entry.accountId === id)) {
+        state.journalEntries = state.journalEntries.map((entry) =>
+          entry.accountId === id ? { ...entry, firmId: savedAccount.firmId, updatedAt: nowIso() } : entry
+        );
+        const journalUpdate = await supabaseClient
+          .from("journal_entries")
+          .update({ firm_id: savedAccount.firmId })
+          .eq("account_id", id);
+        if (journalUpdate.error && isMissingJournalTableError(journalUpdate.error)) {
+          throw new Error("Crea la tabla journal_entries en Supabase para sincronizar el journal.");
+        }
+        throwIfSupabaseError(journalUpdate);
+      }
     } else {
       state.accounts.push(savedAccount);
     }
@@ -2279,17 +2849,22 @@ async function saveAccountFromForm(event) {
     toast("Cuenta guardada.");
   } catch (error) {
     toast(error.message || "No se pudo guardar la cuenta.");
+  } finally {
+    setFormBusy(els.accountForm, false);
   }
 }
 
 async function saveTransactionFromForm(event) {
   event.preventDefault();
   if (!currentUser) return toast("Inicia sesion para guardar.");
+  if (isFormBusy(els.transactionForm)) return;
+  clearFormValidity(els.transactionForm);
 
   const id = els.transactionId.value || createId();
   const existing = state.transactions.find((tx) => tx.id === id);
-  const amount = Math.abs(Number(els.transactionAmount.value));
-  const account = getAccount(els.transactionAccount.value);
+  const amount = parsePositiveAmount(els.transactionAmount.value);
+  const selectedAccountId = els.transactionAccount.value;
+  const account = selectedAccountId ? getAccount(selectedAccountId) : null;
   const transaction = {
     id,
     date: els.transactionDate.value,
@@ -2297,15 +2872,16 @@ async function saveTransactionFromForm(event) {
     category: els.transactionCategory.value,
     amount,
     currency: EURO,
-    firmId: account?.firmId || els.transactionFirm.value,
+    firmId: els.transactionFirm.value,
     accountId: account?.id || "",
     note: els.transactionNote.value.trim(),
     createdAt: existing?.createdAt || nowIso(),
     updatedAt: nowIso(),
   };
 
-  if (!transaction.date || !transaction.kind || !transaction.category || !transaction.amount || !transaction.firmId) return;
+  if (!validateTransaction(transaction, selectedAccountId, account)) return;
 
+  setFormBusy(els.transactionForm, true);
   try {
     const result = await supabaseClient.from("transactions").upsert(transactionToDb(transaction)).select().single();
     throwIfSupabaseError(result);
@@ -2323,6 +2899,64 @@ async function saveTransactionFromForm(event) {
     toast("Movimiento guardado.");
   } catch (error) {
     toast(error.message || "No se pudo guardar el movimiento.");
+  } finally {
+    setFormBusy(els.transactionForm, false);
+  }
+}
+
+async function saveJournalFromForm(event) {
+  event.preventDefault();
+  if (!currentUser) return toast("Inicia sesion para guardar.");
+  if (isFormBusy(els.journalForm)) return;
+  clearFormValidity(els.journalForm);
+
+  const id = els.journalId.value || createId();
+  const existing = state.journalEntries.find((entry) => entry.id === id);
+  const selectedAccountId = els.journalAccount.value;
+  const account = selectedAccountId ? getAccount(selectedAccountId) : null;
+  const pnl = parseSignedAmount(els.journalPnl.value);
+  const entry = {
+    id,
+    date: els.journalDate.value,
+    firmId: els.journalFirm.value,
+    accountId: account?.id || "",
+    title: els.journalTitle.value.trim(),
+    sessionType: els.journalSessionType.value,
+    result: els.journalResult.value,
+    emotion: els.journalEmotion.value,
+    discipline: Number(els.journalDiscipline.value),
+    pnl,
+    notes: els.journalNotes.value.trim(),
+    lesson: els.journalLesson.value.trim(),
+    createdAt: existing?.createdAt || nowIso(),
+    updatedAt: nowIso(),
+  };
+
+  if (!validateJournalEntry(entry, selectedAccountId, account)) return;
+
+  setFormBusy(els.journalForm, true);
+  try {
+    const result = await supabaseClient.from("journal_entries").upsert(journalEntryToDb(entry)).select().single();
+    if (result.error && isJournalSetupError(result.error)) {
+      throw new Error("Ejecuta supabase-journal.sql en Supabase para guardar P&L en el journal.");
+    }
+    throwIfSupabaseError(result);
+    const savedEntry = fromDbJournalEntry(result.data);
+
+    if (existing) {
+      state.journalEntries = state.journalEntries.map((item) => (item.id === id ? savedEntry : item));
+    } else {
+      state.journalEntries.push(savedEntry);
+    }
+
+    persist();
+    closeDialog("journalDialog");
+    refreshAll();
+    toast("Entrada guardada.");
+  } catch (error) {
+    toast(error.message || "No se pudo guardar la entrada.");
+  } finally {
+    setFormBusy(els.journalForm, false);
   }
 }
 
@@ -2331,21 +2965,25 @@ function handleTableAction(event) {
   if (!button) return;
   const { action, id } = button.dataset;
 
+  if (action === "select-journal-day") selectJournalDate(button.dataset.date);
   if (action === "edit-firm") openFirmDialog(getFirm(id));
   if (action === "edit-account") openAccountDialog(getAccount(id));
   if (action === "edit-transaction") openTransactionDialog(getTransaction(id));
+  if (action === "edit-journal") openJournalDialog(getJournalEntry(id));
   if (action === "delete-firm") requestDeleteFirm(id);
   if (action === "delete-account") requestDeleteAccount(id);
   if (action === "delete-transaction") requestDeleteTransaction(id);
+  if (action === "delete-journal") requestDeleteJournalEntry(id);
 }
 
 function requestDeleteFirm(id) {
   const firm = getFirm(id);
   const hasAccounts = state.accounts.some((account) => account.firmId === id);
   const hasTransactions = state.transactions.some((tx) => resolveFirmId(tx) === id);
+  const hasJournalEntries = state.journalEntries.some((entry) => entry.firmId === id);
 
-  if (hasAccounts || hasTransactions) {
-    toast("No puedes eliminar una firm con cuentas o movimientos.");
+  if (hasAccounts || hasTransactions || hasJournalEntries) {
+    toast("No puedes eliminar una firm con cuentas, movimientos o entradas de journal.");
     return;
   }
 
@@ -2366,9 +3004,10 @@ function requestDeleteFirm(id) {
 function requestDeleteAccount(id) {
   const account = getAccount(id);
   const hasTransactions = state.transactions.some((tx) => tx.accountId === id);
+  const hasJournalEntries = state.journalEntries.some((entry) => entry.accountId === id);
 
-  if (hasTransactions) {
-    toast("No puedes eliminar una cuenta con movimientos.");
+  if (hasTransactions || hasJournalEntries) {
+    toast("No puedes eliminar una cuenta con movimientos o entradas de journal.");
     return;
   }
 
@@ -2397,6 +3036,24 @@ function requestDeleteTransaction(id) {
       toast("Movimiento eliminado.");
     } catch (error) {
       toast(error.message || "No se pudo eliminar el movimiento.");
+    }
+  });
+}
+
+function requestDeleteJournalEntry(id) {
+  openConfirm("Eliminar entrada", "Eliminar esta entrada de journal?", async () => {
+    try {
+      const result = await supabaseClient.from("journal_entries").delete().eq("id", id);
+      if (result.error && isMissingJournalTableError(result.error)) {
+        throw new Error("Crea la tabla journal_entries en Supabase para sincronizar el journal.");
+      }
+      throwIfSupabaseError(result);
+      state.journalEntries = state.journalEntries.filter((item) => item.id !== id);
+      persist();
+      refreshAll();
+      toast("Entrada eliminada.");
+    } catch (error) {
+      toast(error.message || "No se pudo eliminar la entrada.");
     }
   });
 }
@@ -2481,6 +3138,7 @@ function importJson(event) {
           firms: imported.firms,
           accounts: imported.accounts,
           transactions: imported.transactions,
+          journalEntries: Array.isArray(imported.journalEntries) ? imported.journalEntries : [],
         };
         persist();
         refreshAll();
@@ -2517,6 +3175,8 @@ async function replaceCloudState(imported) {
   if (!currentUser) throw new Error("Inicia sesion para importar datos.");
 
   const mapped = remapStateForCloud(imported);
+  const deleteJournalEntries = await supabaseClient.from("journal_entries").delete().eq("user_id", currentUser.id);
+  const hasJournalTable = handleJournalTableResult(deleteJournalEntries, mapped.journalEntries.length > 0);
   const deleteTransactions = await supabaseClient.from("transactions").delete().eq("user_id", currentUser.id);
   throwIfSupabaseError(deleteTransactions);
   const deleteAccounts = await supabaseClient.from("accounts").delete().eq("user_id", currentUser.id);
@@ -2535,6 +3195,10 @@ async function replaceCloudState(imported) {
   if (mapped.transactions.length) {
     const result = await supabaseClient.from("transactions").insert(mapped.transactions.map(transactionToDb));
     throwIfSupabaseError(result);
+  }
+  if (mapped.journalEntries.length && hasJournalTable) {
+    const result = await supabaseClient.from("journal_entries").insert(mapped.journalEntries.map(journalEntryToDb));
+    handleJournalTableResult(result, true);
   }
 
   await loadCloudState();
@@ -2599,7 +3263,32 @@ function remapStateForCloud(imported) {
     })
     .filter((transaction) => transaction.firmId);
 
-  return { firms, accounts, transactions };
+  const journalEntries = (Array.isArray(imported.journalEntries) ? imported.journalEntries : [])
+    .filter((entry) => entry?.date && entry?.title)
+    .map((entry) => {
+      const accountId = accountIds.get(entry.accountId) || "";
+      const account = accounts.find((item) => item.id === accountId);
+      const firmId = account?.firmId || firmIds.get(entry.firmId) || "";
+      return {
+        id: createId(),
+        date: entry.date,
+        firmId,
+        accountId,
+        title: String(entry.title).trim(),
+        sessionType: journalSessionLabels[entry.sessionType] ? entry.sessionType : "trading-day",
+        result: journalResultLabels[entry.result] ? entry.result : "neutral",
+        emotion: journalEmotionLabels[entry.emotion] ? entry.emotion : "focused",
+        discipline: clamp(Math.round(Number(entry.discipline || 3)), 1, 5),
+        pnl: Number(entry.pnl || 0),
+        notes: entry.notes || "",
+        lesson: entry.lesson || "",
+        createdAt: entry.createdAt || nowIso(),
+        updatedAt: nowIso(),
+      };
+    })
+    .filter((entry) => entry.firmId);
+
+  return { firms, accounts, transactions, journalEntries };
 }
 
 function maybeCreateLocalMigrationBackup() {
@@ -2631,11 +3320,12 @@ function findLocalStateRaw(keys) {
 }
 
 function hasStateData(value) {
+  const journalEntries = Array.isArray(value?.journalEntries) ? value.journalEntries : [];
   return Boolean(
     Array.isArray(value?.firms) &&
       Array.isArray(value?.accounts) &&
       Array.isArray(value?.transactions) &&
-      (value.firms.length || value.accounts.length || value.transactions.length)
+      (value.firms.length || value.accounts.length || value.transactions.length || journalEntries.length)
   );
 }
 
@@ -2666,6 +3356,10 @@ function getAccount(id) {
 
 function getTransaction(id) {
   return state.transactions.find((transaction) => transaction.id === id);
+}
+
+function getJournalEntry(id) {
+  return state.journalEntries.find((entry) => entry.id === id);
 }
 
 function resolveFirmId(transaction) {
@@ -2699,6 +3393,13 @@ function formatMoney(value) {
   }).format(Number(value || 0));
 }
 
+function formatSignedMoney(value) {
+  const amount = Number(value || 0);
+  if (amount > 0) return `+${formatMoney(amount)}`;
+  if (amount < 0) return formatMoney(amount);
+  return formatMoney(0);
+}
+
 function formatAxisMoney(value) {
   return new Intl.NumberFormat("es-ES", {
     style: "currency",
@@ -2723,6 +3424,16 @@ function formatDate(value) {
     month: "short",
     year: "numeric",
   }).format(date);
+}
+
+function formatMonthLabel(value) {
+  const date = parseLocalDate(`${value}-01`);
+  if (Number.isNaN(date.getTime())) return value;
+  const label = new Intl.DateTimeFormat("es-ES", {
+    month: "long",
+    year: "numeric",
+  }).format(date);
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function formatShortDate(value) {
@@ -2799,6 +3510,13 @@ function normalize(value) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
+}
+
+function pnlToneClass(value) {
+  const amount = Number(value || 0);
+  if (amount > 0) return "positive";
+  if (amount < 0) return "negative";
+  return "neutral";
 }
 
 function escapeHtml(value) {

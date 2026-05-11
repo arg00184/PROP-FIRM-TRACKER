@@ -1,0 +1,55 @@
+create extension if not exists pgcrypto;
+
+create table if not exists public.journal_entries (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  firm_id uuid references public.firms(id) on delete set null,
+  account_id uuid references public.accounts(id) on delete set null,
+  date date not null,
+  title text not null check (length(trim(title)) >= 3),
+  session_type text not null check (
+    session_type in ('trading-day', 'evaluation', 'funded', 'payout-day', 'news-day', 'review', 'other')
+  ),
+  result text not null check (result in ('good', 'neutral', 'bad')),
+  emotion text not null check (
+    emotion in ('calm', 'focused', 'anxious', 'impatient', 'fomo', 'revenge', 'tired', 'other')
+  ),
+  discipline smallint not null check (discipline between 1 and 5),
+  pnl numeric(12, 2) not null default 0,
+  notes text,
+  lesson text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.journal_entries
+  add column if not exists pnl numeric(12, 2) not null default 0;
+
+create index if not exists journal_entries_user_date_idx on public.journal_entries (user_id, date desc);
+create index if not exists journal_entries_user_firm_idx on public.journal_entries (user_id, firm_id);
+create index if not exists journal_entries_user_account_idx on public.journal_entries (user_id, account_id);
+
+alter table public.journal_entries enable row level security;
+
+drop policy if exists "Journal entries are private" on public.journal_entries;
+create policy "Journal entries are private"
+  on public.journal_entries
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create or replace function public.trazza_set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists journal_entries_set_updated_at on public.journal_entries;
+create trigger journal_entries_set_updated_at
+  before update on public.journal_entries
+  for each row
+  execute function public.trazza_set_updated_at();
