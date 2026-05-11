@@ -16,6 +16,8 @@ create table if not exists public.journal_entries (
   ),
   discipline smallint not null check (discipline between 1 and 5),
   pnl numeric(12, 2) not null default 0,
+  errors text[] not null default '{}',
+  operation_url text,
   notes text,
   lesson text,
   created_at timestamptz not null default now(),
@@ -24,6 +26,12 @@ create table if not exists public.journal_entries (
 
 alter table public.journal_entries
   add column if not exists pnl numeric(12, 2) not null default 0;
+
+alter table public.journal_entries
+  add column if not exists errors text[] not null default '{}';
+
+alter table public.journal_entries
+  add column if not exists operation_url text;
 
 create index if not exists journal_entries_user_date_idx on public.journal_entries (user_id, date desc);
 create index if not exists journal_entries_user_firm_idx on public.journal_entries (user_id, firm_id);
@@ -51,5 +59,35 @@ $$;
 drop trigger if exists journal_entries_set_updated_at on public.journal_entries;
 create trigger journal_entries_set_updated_at
   before update on public.journal_entries
+  for each row
+  execute function public.trazza_set_updated_at();
+
+create table if not exists public.journal_error_types (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  id text not null,
+  label text not null check (length(trim(label)) >= 2),
+  color text not null default '#3b82f6' check (color ~ '^#[0-9A-Fa-f]{6}$'),
+  position integer not null default 0,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, id)
+);
+
+create index if not exists journal_error_types_user_position_idx
+  on public.journal_error_types (user_id, position, label);
+
+alter table public.journal_error_types enable row level security;
+
+drop policy if exists "Journal error types are private" on public.journal_error_types;
+create policy "Journal error types are private"
+  on public.journal_error_types
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop trigger if exists journal_error_types_set_updated_at on public.journal_error_types;
+create trigger journal_error_types_set_updated_at
+  before update on public.journal_error_types
   for each row
   execute function public.trazza_set_updated_at();

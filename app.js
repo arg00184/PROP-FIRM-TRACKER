@@ -61,11 +61,24 @@ const journalEmotionLabels = {
   other: "Otro",
 };
 
+const defaultJournalErrorTypes = Object.freeze([
+  { id: "earlyClose", label: "Cerrar pronto", color: "#3b82f6", position: 0, active: true },
+  { id: "tooMuchRisk", label: "Demasiado riesgo", color: "#ef4444", position: 1, active: true },
+  { id: "badStopMove", label: "Mover SL mal", color: "#f5b700", position: 2, active: true },
+  { id: "tooLittleRisk", label: "Poco riesgo", color: "#34a853", position: 3, active: true },
+  { id: "poorSetup", label: "Setup pobre", color: "#ff6b00", position: 4, active: true },
+]);
+
+function cloneDefaultJournalErrorTypes() {
+  return defaultJournalErrorTypes.map((type) => ({ ...type }));
+}
+
 const defaultState = {
   firms: [],
   accounts: [],
   transactions: [],
   journalEntries: [],
+  journalErrorTypes: cloneDefaultJournalErrorTypes(),
 };
 
 const sectionPillars = {
@@ -95,6 +108,8 @@ let journalSelectedDate = "";
 const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const NET_CHART_MIN_VISIBLE_POINTS = 6;
 const NET_CHART_PAN_STEP = 0.12;
+const JOURNAL_CHART_MIN_VISIBLE_POINTS = 6;
+const JOURNAL_CHART_PAN_STEP = 0.12;
 
 const netChartState = {
   dragStartView: null,
@@ -112,18 +127,58 @@ const netChartState = {
   viewStart: 0,
 };
 
+function createJournalTimeChartState() {
+  return {
+    dragStartView: null,
+    dragStartX: 0,
+    dragging: false,
+    fullSeries: [],
+    hoverIndex: null,
+    model: null,
+    pointer: null,
+    pointerId: null,
+    redrawFrame: 0,
+    seriesKey: "",
+    userRange: false,
+    viewEnd: 0,
+    viewStart: 0,
+  };
+}
+
+const journalChartState = {
+  errors: {
+    hoverIndex: null,
+    model: null,
+    pointer: null,
+    redrawFrame: 0,
+  },
+  pnl: createJournalTimeChartState(),
+  discipline: createJournalTimeChartState(),
+};
+
 const els = {};
 
 applyTheme(getInitialTheme());
 
 document.addEventListener("DOMContentLoaded", async () => {
-  bindElements();
-  setCurrentDate();
-  bindEvents();
-  initializeNavigation();
-  updateThemeToggle();
-  refreshAll();
-  await initializeCloud();
+  try {
+    bindElements();
+    setAppAccess(false);
+    setCurrentDate();
+    bindEvents();
+    initializeNavigation();
+    updateThemeToggle();
+    await initializeCloud();
+  } catch (error) {
+    console.error(error);
+    if (els.authScreen && els.appShell) {
+      els.authScreen.hidden = false;
+      els.appShell.hidden = true;
+      if (els.sessionPill) els.sessionPill.hidden = true;
+      if (els.logoutButton) els.logoutButton.hidden = true;
+      els.authMessage.textContent = "No se pudo iniciar la app. Recarga la pagina.";
+    }
+  }
 });
 
 function bindElements() {
@@ -175,12 +230,33 @@ function bindElements() {
     "accountsTableBody",
     "transactionsTableBody",
     "journalSection",
+    "journalPanelTitle",
+    "journalPanelSubtitle",
     "journalCalendarGrid",
     "journalCalendarMonth",
     "journalCalendarPrev",
     "journalCalendarNext",
     "journalCalendarToday",
     "journalCalendarSummary",
+    "journalPnlChart",
+    "journalPnlChartEmpty",
+    "journalPnlSummary",
+    "journalAccountOverview",
+    "journalAccountOverviewName",
+    "journalAccountOverviewBase",
+    "journalAccountBalance",
+    "journalAccountNetPnl",
+    "journalAccountReturn",
+    "journalErrorsChart",
+    "journalErrorsChartEmpty",
+    "journalErrorsSummary",
+    "journalErrorsLegend",
+    "journalDisciplineChart",
+    "journalDisciplineChartEmpty",
+    "journalDisciplineSummary",
+    "journalErrorTypesList",
+    "addJournalErrorButton",
+    "manageJournalErrorsButton",
     "journalSelectedDateLabel",
     "journalClearDateButton",
     "journalEntriesList",
@@ -241,8 +317,17 @@ function bindElements() {
     "journalEmotion",
     "journalDiscipline",
     "journalPnl",
+    "journalOperationUrl",
+    "journalErrorsOptions",
     "journalNotes",
     "journalLesson",
+    "journalErrorManagerDialog",
+    "journalErrorDialog",
+    "journalErrorForm",
+    "journalErrorDialogTitle",
+    "journalErrorTypeId",
+    "journalErrorLabel",
+    "journalErrorColor",
     "confirmDialog",
     "confirmTitle",
     "confirmMessage",
@@ -279,11 +364,9 @@ function bindEvents() {
     });
   });
 
-  document.getElementById("addFirmButton").addEventListener("click", () => openFirmDialog());
   document.getElementById("addFirmButtonInline").addEventListener("click", () => openFirmDialog());
-  document.getElementById("addAccountButton").addEventListener("click", () => openAccountDialog());
   document.getElementById("addAccountButtonInline").addEventListener("click", () => openAccountDialog());
-  document.getElementById("addTransactionButton").addEventListener("click", () => openTransactionDialog());
+  document.getElementById("addTransactionButtonOverview").addEventListener("click", () => openTransactionDialog());
   document.getElementById("addTransactionButtonInline").addEventListener("click", () => openTransactionDialog());
   document.getElementById("addJournalButtonInline").addEventListener("click", () => openJournalDialog());
   els.themeToggleButton.addEventListener("click", toggleTheme);
@@ -317,6 +400,9 @@ function bindEvents() {
   els.accountForm.addEventListener("submit", saveAccountFromForm);
   els.transactionForm.addEventListener("submit", saveTransactionFromForm);
   els.journalForm.addEventListener("submit", saveJournalFromForm);
+  els.journalErrorForm.addEventListener("submit", saveJournalErrorTypeFromForm);
+  els.addJournalErrorButton.addEventListener("click", () => openJournalErrorDialog());
+  els.manageJournalErrorsButton.addEventListener("click", openJournalErrorManagerDialog);
 
   els.transactionKind.addEventListener("change", () => {
     fillTransactionCategories(els.transactionKind.value, els.transactionCategory.value);
@@ -328,6 +414,7 @@ function bindEvents() {
     const account = getAccount(els.transactionAccount.value);
     if (account) {
       els.transactionFirm.value = account.firmId;
+      syncCustomSelect(els.transactionFirm);
       fillAccountSelect(els.transactionAccount, account.firmId, true, account.id);
     }
   });
@@ -338,6 +425,7 @@ function bindEvents() {
     const account = getAccount(els.journalAccount.value);
     if (account) {
       els.journalFirm.value = account.firmId;
+      syncCustomSelect(els.journalFirm);
       fillAccountSelect(els.journalAccount, account.firmId, true, account.id);
     }
   });
@@ -373,6 +461,7 @@ function bindEvents() {
   els.transactionsTableBody.addEventListener("click", handleTableAction);
   els.journalCalendarGrid.addEventListener("click", handleTableAction);
   els.journalEntriesList.addEventListener("click", handleTableAction);
+  els.journalErrorTypesList.addEventListener("click", handleTableAction);
 
   document.getElementById("exportJsonButton").addEventListener("click", exportJson);
   document.getElementById("exportCsvButton").addEventListener("click", exportCsv);
@@ -390,10 +479,277 @@ function bindEvents() {
   });
 
   bindNetChartEvents();
+  bindJournalChartEvents();
+  enhanceSelects();
 
   window.addEventListener("resize", debounce(() => {
     drawCharts(getDashboardSummary());
+    renderJournalDashboard();
   }, 120));
+}
+
+function enhanceSelects(root = document) {
+  root.querySelectorAll("select").forEach((select) => {
+    if (select.dataset.enhancedSelect === "true") {
+      syncCustomSelect(select);
+      return;
+    }
+
+    const shell = document.createElement("div");
+    shell.className = "select-shell";
+    const button = document.createElement("button");
+    button.className = "select-display";
+    button.type = "button";
+    button.setAttribute("aria-haspopup", "listbox");
+    button.innerHTML = `<span></span><i data-lucide="chevron-down"></i>`;
+    const menu = document.createElement("div");
+    menu.className = "select-menu";
+    menu.setAttribute("role", "listbox");
+
+    select.classList.add("enhanced-select");
+    select.dataset.enhancedSelect = "true";
+    select.parentNode.insertBefore(shell, select);
+    shell.append(select, button, menu);
+
+    button.addEventListener("click", () => {
+      if (select.disabled) return;
+      closeCustomSelects(select);
+      shell.classList.toggle("open");
+      button.setAttribute("aria-expanded", String(shell.classList.contains("open")));
+    });
+    select.addEventListener("change", () => syncCustomSelect(select));
+    syncCustomSelect(select);
+  });
+
+  if (!enhanceSelects.bound) {
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest(".select-shell")) closeCustomSelects();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeCustomSelects();
+    });
+    enhanceSelects.bound = true;
+  }
+
+  refreshIcons();
+}
+
+function syncCustomSelect(select) {
+  if (!select?.dataset?.enhancedSelect) return;
+  const shell = select.closest(".select-shell");
+  if (!shell) return;
+  const button = shell.querySelector(".select-display");
+  const label = button?.querySelector("span");
+  const menu = shell.querySelector(".select-menu");
+  const selectedOption = select.selectedOptions?.[0] || select.options?.[0];
+
+  if (label) label.textContent = selectedOption?.textContent || "Selecciona";
+  if (button) {
+    button.disabled = select.disabled;
+    button.setAttribute("aria-expanded", String(shell.classList.contains("open")));
+  }
+  if (!menu) return;
+
+  menu.innerHTML = Array.from(select.options || [])
+    .map(
+      (option) => `
+        <button
+          class="select-option${option.selected ? " selected" : ""}"
+          type="button"
+          role="option"
+          data-value="${escapeHtml(option.value)}"
+          aria-selected="${option.selected ? "true" : "false"}"
+          ${option.disabled ? "disabled" : ""}
+        >
+          ${escapeHtml(option.textContent || option.value)}
+        </button>
+      `
+    )
+    .join("");
+
+  menu.querySelectorAll(".select-option").forEach((optionButton) => {
+    optionButton.addEventListener("click", () => {
+      select.value = optionButton.dataset.value || "";
+      select.dispatchEvent(new Event("input", { bubbles: true }));
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      closeCustomSelects();
+      syncCustomSelect(select);
+    });
+  });
+}
+
+function syncAllCustomSelects() {
+  document.querySelectorAll("select[data-enhanced-select='true']").forEach(syncCustomSelect);
+}
+
+function closeCustomSelects(exceptSelect = null) {
+  document.querySelectorAll(".select-shell.open").forEach((shell) => {
+    if (exceptSelect && shell.contains(exceptSelect)) return;
+    shell.classList.remove("open");
+    shell.querySelector(".select-display")?.setAttribute("aria-expanded", "false");
+  });
+}
+
+function bindJournalChartEvents() {
+  bindJournalTimeChartEvents("pnl", els.journalPnlChart);
+  bindJournalTimeChartEvents("discipline", els.journalDisciplineChart);
+
+  const errorsCanvas = els.journalErrorsChart;
+  if (errorsCanvas) {
+    errorsCanvas.addEventListener("pointermove", handleJournalErrorsPointerMove);
+    errorsCanvas.addEventListener("pointerleave", handleJournalErrorsPointerLeave);
+  }
+}
+
+function bindJournalTimeChartEvents(kind, canvas) {
+  if (!canvas) return;
+  canvas.addEventListener("pointerdown", (event) => handleJournalTimePointerDown(kind, event));
+  canvas.addEventListener("pointermove", (event) => handleJournalTimePointerMove(kind, event));
+  canvas.addEventListener("pointerup", (event) => handleJournalTimePointerUp(kind, event));
+  canvas.addEventListener("pointercancel", (event) => handleJournalTimePointerUp(kind, event));
+  canvas.addEventListener("pointerleave", () => handleJournalTimePointerLeave(kind));
+  canvas.addEventListener("dblclick", (event) => resetJournalTimeChartView(kind, event));
+  canvas.addEventListener("keydown", (event) => handleJournalTimeKeyDown(kind, event));
+  canvas.addEventListener("wheel", (event) => handleJournalTimeWheel(kind, event), { passive: false });
+}
+
+function requestJournalChartRedraw(kind) {
+  const stateForChart = journalChartState[kind];
+  if (!stateForChart || stateForChart.redrawFrame) return;
+  stateForChart.redrawFrame = requestAnimationFrame(() => {
+    stateForChart.redrawFrame = 0;
+    const entries = getJournalDashboardEntries();
+    if (kind === "pnl") drawJournalPnlChart(entries);
+    else if (kind === "discipline") drawJournalDisciplineChart(entries);
+    else if (kind === "errors") drawJournalErrorsChart(entries);
+  });
+}
+
+function handleJournalTimePointerDown(kind, event) {
+  const stateForChart = journalChartState[kind];
+  if (!stateForChart?.model?.series.length) return;
+  const point = getCanvasPoint(event, event.currentTarget);
+  if (!isPointInChart(point, stateForChart.model)) return;
+
+  stateForChart.dragging = true;
+  stateForChart.dragStartX = point.x;
+  stateForChart.dragStartView = getJournalTimeChartRange(kind);
+  stateForChart.pointer = point;
+  stateForChart.pointerId = event.pointerId;
+  event.currentTarget.classList.add("is-panning");
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  updateJournalTimeHoverFromPoint(kind, point);
+  requestJournalChartRedraw(kind);
+  event.preventDefault();
+}
+
+function handleJournalTimePointerMove(kind, event) {
+  const stateForChart = journalChartState[kind];
+  if (!stateForChart?.model?.series.length) return;
+  const point = getCanvasPoint(event, event.currentTarget);
+  stateForChart.pointer = point;
+
+  if (stateForChart.dragging && stateForChart.dragStartView) {
+    const innerWidth = Math.max(1, stateForChart.model.innerWidth);
+    const visibleCount = stateForChart.dragStartView.end - stateForChart.dragStartView.start + 1;
+    const deltaPoints = Math.round(((stateForChart.dragStartX - point.x) / innerWidth) * Math.max(visibleCount - 1, 1));
+    setJournalTimeChartView(
+      kind,
+      stateForChart.dragStartView.start + deltaPoints,
+      stateForChart.dragStartView.end + deltaPoints,
+      true
+    );
+    updateJournalTimeHoverFromPoint(kind, point);
+    requestJournalChartRedraw(kind);
+    return;
+  }
+
+  if (updateJournalTimeHoverFromPoint(kind, point)) {
+    requestJournalChartRedraw(kind);
+  }
+}
+
+function handleJournalTimePointerUp(kind, event) {
+  const stateForChart = journalChartState[kind];
+  if (!stateForChart?.dragging) return;
+  stateForChart.dragging = false;
+  stateForChart.dragStartView = null;
+  stateForChart.pointerId = null;
+  event.currentTarget.classList.remove("is-panning");
+  event.currentTarget.releasePointerCapture?.(event.pointerId);
+  updateJournalTimeHoverFromPoint(kind, getCanvasPoint(event, event.currentTarget));
+  requestJournalChartRedraw(kind);
+}
+
+function handleJournalTimePointerLeave(kind) {
+  const stateForChart = journalChartState[kind];
+  if (!stateForChart || stateForChart.dragging) return;
+  if (stateForChart.hoverIndex === null && !stateForChart.pointer) return;
+  stateForChart.hoverIndex = null;
+  stateForChart.pointer = null;
+  requestJournalChartRedraw(kind);
+}
+
+function handleJournalTimeWheel(kind, event) {
+  const stateForChart = journalChartState[kind];
+  if (!stateForChart?.model?.series.length) return;
+  const point = getCanvasPoint(event, event.currentTarget);
+  if (!isPointInChart(point, stateForChart.model)) return;
+
+  event.preventDefault();
+  zoomJournalTimeChartAt(kind, point, event.deltaY < 0 ? 0.78 : 1.28);
+  stateForChart.pointer = point;
+  updateJournalTimeHoverFromPoint(kind, point);
+  requestJournalChartRedraw(kind);
+}
+
+function handleJournalTimeKeyDown(kind, event) {
+  const stateForChart = journalChartState[kind];
+  if (!stateForChart?.model?.series.length) return;
+
+  const range = getJournalTimeChartRange(kind);
+  const visibleCount = range.end - range.start + 1;
+  const panStep = Math.max(1, Math.round(visibleCount * JOURNAL_CHART_PAN_STEP));
+  const centerPoint = {
+    x: stateForChart.model.pad.left + stateForChart.model.innerWidth / 2,
+    y: stateForChart.model.pad.top + stateForChart.model.innerHeight / 2,
+  };
+
+  if (event.key === "ArrowLeft") {
+    setJournalTimeChartView(kind, range.start - panStep, range.end - panStep, true);
+  } else if (event.key === "ArrowRight") {
+    setJournalTimeChartView(kind, range.start + panStep, range.end + panStep, true);
+  } else if (event.key === "+" || event.key === "=") {
+    zoomJournalTimeChartAt(kind, centerPoint, 0.78);
+  } else if (event.key === "-" || event.key === "_") {
+    zoomJournalTimeChartAt(kind, centerPoint, 1.28);
+  } else if (event.key === "Home" || event.key === "Escape") {
+    resetJournalTimeChartView(kind, event);
+    return;
+  } else {
+    return;
+  }
+
+  event.preventDefault();
+  requestJournalChartRedraw(kind);
+}
+
+function handleJournalErrorsPointerMove(event) {
+  const stateForChart = journalChartState.errors;
+  if (!stateForChart?.model?.segments.length) return;
+  const point = getCanvasPoint(event, els.journalErrorsChart);
+  const previous = stateForChart.hoverIndex;
+  stateForChart.pointer = point;
+  stateForChart.hoverIndex = getJournalErrorsSegmentIndex(point, stateForChart.model);
+  if (previous !== stateForChart.hoverIndex) requestJournalChartRedraw("errors");
+}
+
+function handleJournalErrorsPointerLeave() {
+  const stateForChart = journalChartState.errors;
+  if (stateForChart.hoverIndex === null && !stateForChart.pointer) return;
+  stateForChart.hoverIndex = null;
+  stateForChart.pointer = null;
+  requestJournalChartRedraw("errors");
 }
 
 function bindNetChartEvents() {
@@ -702,11 +1058,12 @@ async function loadCloudState() {
   setSyncStatus("loading", "Sincronizando datos...");
 
   try {
-    const [firmsResult, accountsResult, transactionsResult, journalResult] = await Promise.all([
+    const [firmsResult, accountsResult, transactionsResult, journalResult, journalErrorTypes] = await Promise.all([
       supabaseClient.from("firms").select("*").order("name", { ascending: true }),
       supabaseClient.from("accounts").select("*").order("created_at", { ascending: true }),
       supabaseClient.from("transactions").select("*").order("date", { ascending: true }),
       fetchJournalEntries(),
+      fetchJournalErrorTypes(),
     ]);
 
     [firmsResult, accountsResult, transactionsResult].forEach(throwIfSupabaseError);
@@ -716,6 +1073,7 @@ async function loadCloudState() {
       accounts: (accountsResult.data || []).map(fromDbAccount),
       transactions: (transactionsResult.data || []).map(fromDbTransaction),
       journalEntries: journalResult,
+      journalErrorTypes,
     };
     refreshAll();
     updateMigrationButton();
@@ -743,6 +1101,43 @@ async function fetchJournalEntries() {
   return (result.data || []).map(fromDbJournalEntry);
 }
 
+async function fetchJournalErrorTypes() {
+  const result = await supabaseClient
+    .from("journal_error_types")
+    .select("*")
+    .order("position", { ascending: true })
+    .order("label", { ascending: true });
+
+  if (result.error) {
+    if (isMissingJournalErrorTypesTableError(result.error)) {
+      toast("Ejecuta supabase-journal.sql para personalizar errores del journal.");
+      return cloneDefaultJournalErrorTypes();
+    }
+    throw result.error;
+  }
+
+  const errorTypes = normalizeJournalErrorTypes((result.data || []).map(fromDbJournalErrorType));
+  if (errorTypes.length) return errorTypes;
+  return seedDefaultJournalErrorTypes();
+}
+
+async function seedDefaultJournalErrorTypes() {
+  if (!currentUser || !supabaseClient) return cloneDefaultJournalErrorTypes();
+  const seed = cloneDefaultJournalErrorTypes();
+  const result = await supabaseClient
+    .from("journal_error_types")
+    .upsert(seed.map(journalErrorTypeToDb), { onConflict: "user_id,id" })
+    .select("*")
+    .order("position", { ascending: true })
+    .order("label", { ascending: true });
+
+  if (result.error) {
+    if (isMissingJournalErrorTypesTableError(result.error)) return seed;
+    throw result.error;
+  }
+  return normalizeJournalErrorTypes((result.data || []).map(fromDbJournalErrorType));
+}
+
 function isMissingJournalTableError(error) {
   const message = String(error?.message || "");
   return (
@@ -753,15 +1148,32 @@ function isMissingJournalTableError(error) {
   );
 }
 
+function isMissingJournalErrorTypesTableError(error) {
+  const message = String(error?.message || "");
+  return (
+    error?.code === "42P01" ||
+    error?.code === "PGRST205" ||
+    (message.includes("journal_error_types") && message.includes("does not exist")) ||
+    message.includes("Could not find the table")
+  );
+}
+
 function isJournalSetupError(error) {
   const message = String(error?.message || "");
-  return isMissingJournalTableError(error) || error?.code === "PGRST204" || message.includes("pnl");
+  return (
+    isMissingJournalTableError(error) ||
+    isMissingJournalErrorTypesTableError(error) ||
+    error?.code === "PGRST204" ||
+    message.includes("pnl") ||
+    message.includes("errors") ||
+    message.includes("operation_url")
+  );
 }
 
 function handleJournalTableResult(result, requireTable = false) {
   if (result.error && isJournalSetupError(result.error)) {
     if (requireTable) {
-      throw new Error("Ejecuta supabase-journal.sql en Supabase para actualizar el journal con P&L.");
+      throw new Error("Ejecuta supabase-journal.sql en Supabase para actualizar el journal.");
     }
     return false;
   }
@@ -787,7 +1199,7 @@ function getInitialPillar() {
 
 function getInitialJournalView() {
   const stored = localStorage.getItem(JOURNAL_VIEW_STORAGE_KEY);
-  return stored === "entries" ? "entries" : "calendar";
+  return stored === "entries" ? "entries" : "dashboard";
 }
 
 function applyTheme(theme) {
@@ -801,6 +1213,7 @@ function toggleTheme() {
   applyTheme(nextTheme);
   updateThemeToggle();
   drawCharts(getDashboardSummary());
+  renderJournalDashboard();
 }
 
 function updateThemeToggle() {
@@ -837,6 +1250,7 @@ function loadState() {
       accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
       transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
       journalEntries: Array.isArray(parsed.journalEntries) ? parsed.journalEntries : [],
+      journalErrorTypes: normalizeJournalErrorTypes(parsed.journalErrorTypes),
     };
   } catch {
     return structuredClone(defaultState);
@@ -904,8 +1318,22 @@ function fromDbJournalEntry(row) {
     emotion: row.emotion || "focused",
     discipline: Number(row.discipline || 3),
     pnl: Number(row.pnl || 0),
+    errors: sanitizeJournalErrors(row.errors),
+    operationUrl: row.operation_url || "",
     notes: row.notes || "",
     lesson: row.lesson || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || row.created_at,
+  };
+}
+
+function fromDbJournalErrorType(row) {
+  return {
+    id: row.id,
+    label: row.label || "",
+    color: row.color || "#3b82f6",
+    position: Number(row.position || 0),
+    active: row.active !== false,
     createdAt: row.created_at,
     updatedAt: row.updated_at || row.created_at,
   };
@@ -961,14 +1389,29 @@ function journalEntryToDb(entry) {
     emotion: entry.emotion,
     discipline: entry.discipline,
     pnl: Number(entry.pnl || 0),
+    errors: sanitizeJournalErrors(entry.errors),
+    operation_url: entry.operationUrl || null,
     notes: entry.notes || null,
     lesson: entry.lesson || null,
     updated_at: entry.updatedAt || nowIso(),
   };
 }
 
+function journalErrorTypeToDb(type) {
+  return {
+    id: type.id,
+    user_id: currentUser.id,
+    label: String(type.label || "").trim(),
+    color: normalizeHexColor(type.color) || "#3b82f6",
+    position: Number(type.position || 0),
+    active: type.active !== false,
+    updated_at: type.updatedAt || nowIso(),
+  };
+}
+
 function refreshAll() {
   fillFirmSelects();
+  renderJournalErrorChoices();
   updateDashboardDateInputs();
   fillAccountSelect(els.transactionAccount, els.transactionFirm.value, true);
   renderDashboard();
@@ -976,6 +1419,7 @@ function refreshAll() {
   renderAccountsTable();
   renderTransactionsTable();
   renderJournalApp();
+  syncAllCustomSelects();
   refreshIcons();
 }
 
@@ -1003,6 +1447,7 @@ function chartPalette() {
     capitalFillSoft: themeColor("--capital-fill-soft"),
     green: themeColor("--green"),
     red: themeColor("--red"),
+    cyan: themeColor("--cyan"),
   };
 }
 
@@ -1013,19 +1458,24 @@ function initializeNavigation() {
 
 function setActivePillar(pillar) {
   if (!pillarDefaultSections[pillar]) return;
+  if (pillar === "journal") {
+    journalView = "dashboard";
+    localStorage.setItem(JOURNAL_VIEW_STORAGE_KEY, journalView);
+  }
   setActiveSection(pillarDefaultSections[pillar]);
 }
 
 function setJournalView(view) {
-  if (!["calendar", "entries"].includes(view)) return;
+  if (!["dashboard", "entries"].includes(view)) return;
   journalView = view;
   localStorage.setItem(JOURNAL_VIEW_STORAGE_KEY, journalView);
   if (els.journalSection) {
     els.journalSection.dataset.journalView = journalView;
   }
   if (activeSection === "journal" && els.pageTitle) {
-    els.pageTitle.textContent = journalView === "entries" ? "Journal - Entradas" : "Journal - Calendario";
+    els.pageTitle.textContent = journalView === "entries" ? "Journal - Entradas" : "Journal - Dashboard";
   }
+  updateJournalPanelHeading();
   updateNavigationState();
 }
 
@@ -1036,7 +1486,7 @@ function setActiveSection(section) {
     firms: "Firms",
     accounts: "Cuentas",
     transactions: "Movimientos",
-    journal: journalView === "entries" ? "Journal - Entradas" : "Journal - Calendario",
+    journal: journalView === "entries" ? "Journal - Entradas" : "Journal - Dashboard",
   };
 
   activeSection = section;
@@ -1049,9 +1499,21 @@ function setActiveSection(section) {
   if (els.journalSection) {
     els.journalSection.dataset.journalView = journalView;
   }
+  updateJournalPanelHeading();
   updateNavigationState();
   els.pageTitle.textContent = titles[section] || "Panel";
   drawCharts(getDashboardSummary());
+}
+
+function updateJournalPanelHeading() {
+  if (!els.journalPanelTitle || !els.journalPanelSubtitle) return;
+  if (journalView === "entries") {
+    els.journalPanelTitle.textContent = "Entradas";
+    els.journalPanelSubtitle.textContent = "Sesiones, decisiones y aprendizajes";
+    return;
+  }
+  els.journalPanelTitle.textContent = "Dashboard";
+  els.journalPanelSubtitle.textContent = "P&L, disciplina, errores y calendario";
 }
 
 function updateNavigationState() {
@@ -1093,6 +1555,7 @@ function resetAccountFilters() {
   els.accountFirmFilter.value = "all";
   els.accountStatusFilter.value = "all";
   els.accountSearch.value = "";
+  syncAllCustomSelects();
   renderAccountsTable();
 }
 
@@ -1102,6 +1565,7 @@ function resetTransactionFilters() {
   els.transactionFromFilter.value = "";
   els.transactionToFilter.value = "";
   els.transactionSearch.value = "";
+  syncAllCustomSelects();
   renderTransactionsTable();
 }
 
@@ -1112,6 +1576,7 @@ function resetJournalFilters() {
   els.journalPeriodFilter.value = "all";
   els.journalSearch.value = "";
   journalSelectedDate = "";
+  syncAllCustomSelects();
   renderJournalApp();
 }
 
@@ -1131,6 +1596,7 @@ function selectJournalDate(date) {
   if (!isValidIsoDate(date)) return;
   journalSelectedDate = date;
   els.journalPeriodFilter.value = "all";
+  syncCustomSelect(els.journalPeriodFilter);
   setJournalView("entries");
   renderJournalApp();
 }
@@ -1173,6 +1639,7 @@ function setSelectOptions(select, optionsHtml, fallbackValue = "") {
   } else {
     select.value = values[0] || "";
   }
+  syncCustomSelect(select);
 }
 
 function fillDashboardAccountFilter() {
@@ -1208,6 +1675,7 @@ function fillAccountSelect(select, firmId, includeEmpty, selectedId = "") {
     .map((account) => `<option value="${escapeHtml(account.id)}">${escapeHtml(account.name)}</option>`)
     .join("")}`;
   select.value = selectedId || "";
+  syncCustomSelect(select);
 }
 
 function fillTransactionCategories(kind, selected = "") {
@@ -1218,6 +1686,7 @@ function fillTransactionCategories(kind, selected = "") {
   if (categories.includes(selected)) {
     els.transactionCategory.value = selected;
   }
+  syncCustomSelect(els.transactionCategory);
 }
 
 function getDashboardFilters() {
@@ -1295,6 +1764,7 @@ function resetDashboardFilters() {
   els.dashboardPeriodFilter.value = "all";
   els.dashboardFromFilter.value = "";
   els.dashboardToFilter.value = "";
+  syncAllCustomSelects();
   updateDashboardDateInputs();
   resetNetChartInteraction();
   renderDashboard();
@@ -1750,18 +2220,653 @@ function renderTransactionsTable() {
 }
 
 function renderJournalApp() {
-  renderJournalCalendar();
+  renderJournalDashboard();
   renderJournalEntries();
+}
+
+function renderJournalDashboard() {
+  const entries = getJournalDashboardEntries();
+  renderJournalAccountOverview(entries);
+  drawJournalPnlChart(entries);
+  drawJournalErrorsChart(entries);
+  drawJournalDisciplineChart(entries);
+  renderJournalErrorSettings();
+  renderJournalCalendar();
+}
+
+function getJournalDashboardEntries() {
+  return getFilteredJournalEntries({ includePeriod: false, includeSearch: false, includeSelectedDate: false });
+}
+
+function renderJournalAccountOverview(entries) {
+  const accountId = els.journalAccountFilter.value || "all";
+  if (accountId === "all") {
+    els.journalAccountOverview.hidden = true;
+    return;
+  }
+
+  const account = getAccount(accountId);
+  const firm = getFirm(account?.firmId);
+  const base = parseAccountSizeAmount(account?.size);
+  const netPnl = sum(entries.map((entry) => entry.pnl));
+  const balance = Number.isFinite(base) ? base + netPnl : netPnl;
+  const returnPercent = Number.isFinite(base) && base > 0 ? (netPnl / base) * 100 : null;
+
+  els.journalAccountOverview.hidden = false;
+  els.journalAccountOverviewName.textContent = [account?.name || "Cuenta", firm?.name].filter(Boolean).join(" · ");
+  els.journalAccountOverviewBase.textContent = Number.isFinite(base)
+    ? `Base ${formatTradingMoney(base)}`
+    : "Anade tamano de cuenta para calcular %";
+  els.journalAccountBalance.textContent = formatTradingMoney(balance);
+  els.journalAccountNetPnl.textContent = formatSignedTradingMoney(netPnl);
+  els.journalAccountNetPnl.className = pnlToneClass(netPnl);
+  els.journalAccountReturn.textContent = returnPercent === null ? "-" : formatSignedPercent(returnPercent);
+  els.journalAccountReturn.className = returnPercent === null ? "neutral" : pnlToneClass(returnPercent);
+}
+
+function syncJournalTimeChartState(kind, fullSeries, seriesKey) {
+  const stateForChart = journalChartState[kind];
+  stateForChart.fullSeries = fullSeries;
+
+  if (!fullSeries.length) {
+    stateForChart.hoverIndex = null;
+    stateForChart.model = null;
+    stateForChart.pointer = null;
+    stateForChart.seriesKey = "";
+    stateForChart.userRange = false;
+    stateForChart.viewStart = 0;
+    stateForChart.viewEnd = 0;
+    return;
+  }
+
+  if (seriesKey !== stateForChart.seriesKey) {
+    stateForChart.seriesKey = seriesKey;
+    if (!stateForChart.userRange) {
+      stateForChart.viewStart = 0;
+      stateForChart.viewEnd = fullSeries.length - 1;
+    }
+  }
+
+  setJournalTimeChartView(kind, stateForChart.viewStart, stateForChart.viewEnd, stateForChart.userRange);
+  if (stateForChart.hoverIndex > fullSeries.length - 1) {
+    stateForChart.hoverIndex = null;
+  }
+}
+
+function getJournalTimeChartRange(kind) {
+  const stateForChart = journalChartState[kind];
+  const total = stateForChart.fullSeries.length;
+  if (!total) return { start: 0, end: 0 };
+  const start = clamp(Math.round(stateForChart.viewStart), 0, total - 1);
+  const end = clamp(Math.round(stateForChart.viewEnd), start, total - 1);
+  return { start, end };
+}
+
+function getJournalTimeVisibleSeries(kind) {
+  const stateForChart = journalChartState[kind];
+  const range = getJournalTimeChartRange(kind);
+  return stateForChart.fullSeries.slice(range.start, range.end + 1).map((point, index) => ({
+    ...point,
+    fullIndex: range.start + index,
+  }));
+}
+
+function setJournalTimeChartView(kind, start, end, userRange = true) {
+  const stateForChart = journalChartState[kind];
+  const total = stateForChart.fullSeries.length;
+  if (!total) return;
+
+  const lastIndex = total - 1;
+  const desiredCount = Math.max(1, Math.round(end - start + 1));
+  const visibleCount = Math.min(total, Math.max(Math.min(JOURNAL_CHART_MIN_VISIBLE_POINTS, total), desiredCount));
+
+  if (visibleCount >= total) {
+    stateForChart.viewStart = 0;
+    stateForChart.viewEnd = lastIndex;
+    stateForChart.userRange = false;
+    return;
+  }
+
+  let nextStart = Math.round(start);
+  let nextEnd = nextStart + visibleCount - 1;
+
+  if (nextStart < 0) {
+    nextStart = 0;
+    nextEnd = visibleCount - 1;
+  }
+  if (nextEnd > lastIndex) {
+    nextEnd = lastIndex;
+    nextStart = lastIndex - visibleCount + 1;
+  }
+
+  stateForChart.viewStart = nextStart;
+  stateForChart.viewEnd = nextEnd;
+  stateForChart.userRange = userRange;
+}
+
+function zoomJournalTimeChartAt(kind, point, factor) {
+  const stateForChart = journalChartState[kind];
+  const total = stateForChart.fullSeries.length;
+  if (!total || !stateForChart.model) return;
+
+  const range = getJournalTimeChartRange(kind);
+  const visibleCount = range.end - range.start + 1;
+  const minCount = Math.min(JOURNAL_CHART_MIN_VISIBLE_POINTS, total);
+  const nextCount = clamp(Math.round(visibleCount * factor), minCount, total);
+  if (nextCount === visibleCount) return;
+
+  const ratio = clamp((point.x - stateForChart.model.pad.left) / Math.max(1, stateForChart.model.innerWidth), 0, 1);
+  const anchor = range.start + ratio * Math.max(visibleCount - 1, 1);
+  const nextStart = Math.round(anchor - ratio * Math.max(nextCount - 1, 1));
+  setJournalTimeChartView(kind, nextStart, nextStart + nextCount - 1, true);
+}
+
+function resetJournalTimeChartView(kind, event) {
+  if (event) event.preventDefault();
+  const stateForChart = journalChartState[kind];
+  if (!stateForChart.fullSeries.length) return;
+  stateForChart.userRange = false;
+  setJournalTimeChartView(kind, 0, stateForChart.fullSeries.length - 1, false);
+  requestJournalChartRedraw(kind);
+}
+
+function updateJournalTimeHoverFromPoint(kind, point) {
+  const stateForChart = journalChartState[kind];
+  const previous = stateForChart.hoverIndex;
+  const model = stateForChart.model;
+  if (!model?.series.length || !isPointInChart(point, model)) {
+    stateForChart.hoverIndex = null;
+    return previous !== null;
+  }
+
+  const relativeX = clamp((point.x - model.pad.left) / Math.max(1, model.innerWidth), 0, 1);
+  const visibleIndex = clamp(Math.round(relativeX * Math.max(model.series.length - 1, 0)), 0, model.series.length - 1);
+  stateForChart.hoverIndex = model.series[visibleIndex].fullIndex;
+  return previous !== stateForChart.hoverIndex;
+}
+
+function drawJournalPnlChart(entries) {
+  const canvas = els.journalPnlChart;
+  if (!canDrawCanvas(canvas)) return;
+  const ctx = canvas.getContext("2d");
+  const palette = chartPalette();
+  const fullSeries = buildJournalPnlSeries(entries);
+  setupCanvas(canvas, ctx);
+  const size = chartSize(canvas);
+  ctx.clearRect(0, 0, size.width, size.height);
+
+  if (!fullSeries.length) {
+    syncJournalTimeChartState("pnl", fullSeries, "");
+    clearCanvasDomLabels(canvas);
+    els.journalPnlChartEmpty.style.display = "grid";
+    els.journalPnlSummary.textContent = "Sin entradas con P&L registrado.";
+    return;
+  }
+  els.journalPnlChartEmpty.style.display = "none";
+
+  const first = fullSeries[0];
+  const lastFull = fullSeries[fullSeries.length - 1];
+  const seriesKey = `${fullSeries.length}:${first.date}:${first.total}:${lastFull.date}:${lastFull.total}:${lastFull.pnl}`;
+  syncJournalTimeChartState("pnl", fullSeries, seriesKey);
+  const series = getJournalTimeVisibleSeries("pnl");
+  const total = lastFull.total;
+  const best = Math.max(...fullSeries.map((point) => point.total));
+  const worst = Math.min(...fullSeries.map((point) => point.total));
+  els.journalPnlSummary.textContent = `${formatSignedMoney(total)} total - Max ${formatSignedMoney(best)} - Min ${formatSignedMoney(worst)}`;
+
+  const rawMin = Math.min(0, ...series.map((point) => point.total));
+  const rawMax = Math.max(0, ...series.map((point) => point.total));
+  const padding = Math.max((rawMax - rawMin) * 0.12, 1);
+  const min = rawMin - padding;
+  const max = rawMax + padding;
+  const pad = chartPadding(canvas);
+  const range = max - min || 1;
+  const xFor = (index) => pad.left + (index / Math.max(series.length - 1, 1)) * (size.width - pad.left - pad.right);
+  const yFor = (value) => pad.top + ((max - value) / range) * (size.height - pad.top - pad.bottom);
+  const zeroY = yFor(0);
+  const dateTicks = getXAxisTicks(series.map((point) => ({ ...point, net: point.total })), canvas);
+  const model = {
+    canvas,
+    fullSeries,
+    height: size.height,
+    innerHeight: size.height - pad.top - pad.bottom,
+    innerWidth: size.width - pad.left - pad.right,
+    max,
+    min,
+    pad,
+    series,
+    viewEnd: getJournalTimeChartRange("pnl").end,
+    viewStart: getJournalTimeChartRange("pnl").start,
+    width: size.width,
+    xFor,
+    yFor,
+  };
+  journalChartState.pnl.model = model;
+  if (journalChartState.pnl.pointer) updateJournalTimeHoverFromPoint("pnl", journalChartState.pnl.pointer);
+
+  drawGrid(ctx, canvas, min, max, null);
+  drawDateGuides(ctx, canvas, dateTicks, xFor, palette);
+  ctx.strokeStyle = palette.axis;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  const axisY = alignCanvasLine(zeroY, canvas);
+  ctx.moveTo(pad.left, axisY);
+  ctx.lineTo(size.width - pad.right, axisY);
+  ctx.stroke();
+
+  const gradient = ctx.createLinearGradient(0, yFor(best), 0, zeroY);
+  gradient.addColorStop(0, palette.capitalFill);
+  gradient.addColorStop(1, palette.capitalFillSoft || "rgba(124, 58, 237, 0)");
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.moveTo(xFor(0), zeroY);
+  drawSmoothSeriesPath(ctx, series, "total", xFor, yFor, true);
+  ctx.lineTo(xFor(series.length - 1), zeroY);
+  ctx.closePath();
+  ctx.fill();
+
+  drawSeriesLine(ctx, series, "total", xFor, yFor, palette.capital, 3);
+  const last = series[series.length - 1];
+  const domLabels = getJournalTimeDomLabels(canvas, pad, size, series, formatAxisMoney(max), formatAxisMoney(min));
+  if (journalChartState.pnl.hoverIndex === null) {
+    domLabels.push(getChartValueDomLabel(formatSignedMoney(last.total), size.width - pad.right, yFor(last.total)));
+  } else {
+    const tooltip = drawJournalPnlHover(ctx, model, palette);
+    if (tooltip) domLabels.push(tooltip);
+  }
+  setCanvasDomLabels(canvas, domLabels);
+}
+
+function buildJournalPnlSeries(entries) {
+  const totalsByDate = new Map();
+  entries
+    .filter((entry) => entry.date && Number.isFinite(Number(entry.pnl)))
+    .forEach((entry) => {
+      totalsByDate.set(entry.date, (totalsByDate.get(entry.date) || 0) + Number(entry.pnl || 0));
+    });
+
+  let total = 0;
+  return [...totalsByDate.keys()].sort().map((date) => {
+    const pnl = totalsByDate.get(date) || 0;
+    total += pnl;
+    return { date, pnl, total };
+  });
+}
+
+function drawJournalDisciplineChart(entries) {
+  const canvas = els.journalDisciplineChart;
+  if (!canDrawCanvas(canvas)) return;
+  const ctx = canvas.getContext("2d");
+  const palette = chartPalette();
+  const fullSeries = buildJournalDisciplineSeries(entries);
+  setupCanvas(canvas, ctx);
+  const size = chartSize(canvas);
+  ctx.clearRect(0, 0, size.width, size.height);
+
+  if (!fullSeries.length) {
+    syncJournalTimeChartState("discipline", fullSeries, "");
+    clearCanvasDomLabels(canvas);
+    els.journalDisciplineChartEmpty.style.display = "grid";
+    els.journalDisciplineSummary.textContent = "Sin entradas con disciplina.";
+    return;
+  }
+  els.journalDisciplineChartEmpty.style.display = "none";
+
+  const firstPoint = fullSeries[0];
+  const lastFull = fullSeries[fullSeries.length - 1];
+  const seriesKey = `${fullSeries.length}:${firstPoint.date}:${firstPoint.discipline}:${lastFull.date}:${lastFull.discipline}:${lastFull.count}`;
+  syncJournalTimeChartState("discipline", fullSeries, seriesKey);
+  const series = getJournalTimeVisibleSeries("discipline");
+  const average = sum(fullSeries.map((point) => point.discipline)) / fullSeries.length;
+  const first = firstPoint.discipline;
+  const last = lastFull.discipline;
+  const trend = last - first;
+  els.journalDisciplineSummary.textContent = `Media ${average.toFixed(1)}/5 - ${trend >= 0 ? "+" : ""}${trend.toFixed(1)} desde el inicio.`;
+
+  const min = 1;
+  const max = 5;
+  const pad = chartPadding(canvas);
+  const xFor = (index) => pad.left + (index / Math.max(series.length - 1, 1)) * (size.width - pad.left - pad.right);
+  const yFor = (value) => pad.top + ((max - value) / (max - min)) * (size.height - pad.top - pad.bottom);
+  const dateTicks = getXAxisTicks(series.map((point) => ({ ...point, net: point.discipline })), canvas);
+  const model = {
+    canvas,
+    fullSeries,
+    height: size.height,
+    innerHeight: size.height - pad.top - pad.bottom,
+    innerWidth: size.width - pad.left - pad.right,
+    max,
+    min,
+    pad,
+    series,
+    viewEnd: getJournalTimeChartRange("discipline").end,
+    viewStart: getJournalTimeChartRange("discipline").start,
+    width: size.width,
+    xFor,
+    yFor,
+  };
+  journalChartState.discipline.model = model;
+  if (journalChartState.discipline.pointer) {
+    updateJournalTimeHoverFromPoint("discipline", journalChartState.discipline.pointer);
+  }
+
+  drawGrid(ctx, canvas, min, max, null);
+  drawDateGuides(ctx, canvas, dateTicks, xFor, palette);
+  drawSeriesLine(ctx, series, "discipline", xFor, yFor, palette.cyan || palette.capital, 3);
+
+  ctx.fillStyle = palette.cyan || palette.capital;
+  series.forEach((point, index) => {
+    const x = xFor(index);
+    const y = yFor(point.discipline);
+    ctx.beginPath();
+    ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  const latest = series[series.length - 1];
+  const domLabels = getJournalTimeDomLabels(canvas, pad, size, series, "5/5", "1/5");
+  if (journalChartState.discipline.hoverIndex === null) {
+    domLabels.push(getChartValueDomLabel(`${latest.discipline.toFixed(1)}/5`, size.width - pad.right, yFor(latest.discipline)));
+  } else {
+    const tooltip = drawJournalDisciplineHover(ctx, model, palette);
+    if (tooltip) domLabels.push(tooltip);
+  }
+  setCanvasDomLabels(canvas, domLabels);
+}
+
+function buildJournalDisciplineSeries(entries) {
+  const grouped = new Map();
+  entries
+    .filter((entry) => entry.date && Number.isFinite(Number(entry.discipline)))
+    .forEach((entry) => {
+      const values = grouped.get(entry.date) || [];
+      values.push(clamp(Number(entry.discipline || 3), 1, 5));
+      grouped.set(entry.date, values);
+    });
+
+  return [...grouped.keys()].sort().map((date) => {
+    const values = grouped.get(date) || [];
+    return {
+      date,
+      count: values.length,
+      discipline: sum(values) / Math.max(values.length, 1),
+    };
+  });
+}
+
+function drawJournalPnlHover(ctx, model, palette) {
+  const visibleIndex = journalChartState.pnl.hoverIndex - model.viewStart;
+  const point = model.series[visibleIndex];
+  if (!point) return null;
+
+  const x = model.xFor(visibleIndex);
+  const y = model.yFor(point.total);
+  drawJournalTimeGuide(ctx, model, x, palette);
+  drawHoverDot(ctx, x, y, palette.capital, palette, 5);
+  return getChartTooltipDomLabel(
+    x,
+    y,
+    formatDate(point.date),
+    [
+      { label: "P&L total", value: formatSignedMoney(point.total), color: palette.capital },
+      { label: "P&L dia", value: formatSignedMoney(point.pnl), color: point.pnl >= 0 ? palette.green : palette.red },
+    ],
+    model.canvas
+  );
+}
+
+function drawJournalDisciplineHover(ctx, model, palette) {
+  const visibleIndex = journalChartState.discipline.hoverIndex - model.viewStart;
+  const point = model.series[visibleIndex];
+  if (!point) return null;
+
+  const x = model.xFor(visibleIndex);
+  const y = model.yFor(point.discipline);
+  const color = palette.cyan || palette.capital;
+  drawJournalTimeGuide(ctx, model, x, palette);
+  drawHoverDot(ctx, x, y, color, palette, 5);
+  return getChartTooltipDomLabel(
+    x,
+    y,
+    formatDate(point.date),
+    [
+      { label: "Disciplina", value: `${point.discipline.toFixed(1)}/5`, color },
+      { label: "Entradas", value: String(point.count || 1), color: palette.muted },
+    ],
+    model.canvas
+  );
+}
+
+function drawJournalTimeGuide(ctx, model, x, palette) {
+  const guideX = alignCanvasLine(x, model.canvas);
+  ctx.save();
+  ctx.strokeStyle = palette.axis;
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.75;
+  ctx.setLineDash([4, 5]);
+  ctx.beginPath();
+  ctx.moveTo(guideX, model.pad.top);
+  ctx.lineTo(guideX, model.height - model.pad.bottom);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function getJournalTimeDomLabels(canvas, pad, size, series, topLabel, bottomLabel) {
+  return [
+    { kind: "label", className: "axis-y", text: topLabel, x: pad.left - 8, y: pad.top, anchor: "right-middle" },
+    { kind: "label", className: "axis-y", text: bottomLabel, x: pad.left - 8, y: size.height - pad.bottom, anchor: "right-middle" },
+    { kind: "label", className: "axis-x", text: formatShortDate(series[0]?.date), x: pad.left, y: size.height - 10, anchor: "left-bottom" },
+    {
+      kind: "label",
+      className: "axis-x",
+      text: formatShortDate(series[series.length - 1]?.date),
+      x: size.width - pad.right,
+      y: size.height - 10,
+      anchor: "right-bottom",
+    },
+  ];
+}
+
+function getChartValueDomLabel(text, x, y) {
+  return { kind: "value", text, x, y: y - 8, anchor: "right-top" };
+}
+
+function getChartTooltipDomLabel(x, y, title, rows, canvas = null) {
+  const size = canvas ? chartSize(canvas) : { width: 0 };
+  const anchor = size.width && x > size.width * 0.62 ? "tooltip-left" : "tooltip-right";
+  return { kind: "tooltip", x, y, title, rows, anchor };
+}
+
+function getChartCenterDomLabel(value, label, x, y) {
+  return { kind: "center", value, label, x, y };
+}
+
+function drawJournalErrorsChart(entries) {
+  const canvas = els.journalErrorsChart;
+  if (!canDrawCanvas(canvas)) return;
+  const ctx = canvas.getContext("2d");
+  const rows = getJournalErrorRows(entries);
+  setupCanvas(canvas, ctx);
+  const size = chartSize(canvas);
+  ctx.clearRect(0, 0, size.width, size.height);
+
+  if (!rows.length) {
+    journalChartState.errors.model = null;
+    journalChartState.errors.hoverIndex = null;
+    clearCanvasDomLabels(canvas);
+    els.journalErrorsChartEmpty.style.display = "grid";
+    els.journalErrorsSummary.textContent = "Sin errores registrados.";
+    els.journalErrorsLegend.innerHTML = "";
+    return;
+  }
+  els.journalErrorsChartEmpty.style.display = "none";
+
+  const total = sum(rows.map((row) => row.count));
+  els.journalErrorsSummary.textContent = `${total} ${total === 1 ? "error registrado" : "errores registrados"} en el filtro actual.`;
+  els.journalErrorsLegend.innerHTML = rows
+    .map(
+      (row) => `
+        <div class="journal-error-legend-row">
+          <i style="--error-color: ${escapeHtml(row.color)}"></i>
+          <span>${escapeHtml(row.label)}</span>
+          <strong>${row.count}</strong>
+        </div>
+      `
+    )
+    .join("");
+
+  const radius = Math.max(1, Math.min(size.width, size.height) * 0.38);
+  const innerRadius = radius * 0.5;
+  const centerX = size.width / 2;
+  const centerY = size.height / 2;
+  let start = -Math.PI / 2;
+  const segments = [];
+
+  rows.forEach((row, index) => {
+    const angle = (row.count / total) * Math.PI * 2;
+    const isHover = journalChartState.errors.hoverIndex === index;
+    const segmentRadius = isHover ? radius + 5 : radius;
+    ctx.save();
+    if (journalChartState.errors.hoverIndex !== null && !isHover) ctx.globalAlpha = 0.58;
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.arc(centerX, centerY, segmentRadius, start, start + angle);
+    ctx.closePath();
+    ctx.fillStyle = row.color;
+    ctx.fill();
+    ctx.restore();
+    segments.push({ end: start + angle, index, row, start });
+    start += angle;
+  });
+  journalChartState.errors.model = { canvas, centerX, centerY, innerRadius, radius, segments };
+
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, innerRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalCompositeOperation = "source-over";
+
+  ctx.fillStyle = themeColor("--surface");
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, Math.max(1, innerRadius - 1), 0, Math.PI * 2);
+  ctx.fill();
+
+  const domLabels = [getChartCenterDomLabel(String(total), "errores", centerX, centerY)];
+  if (journalChartState.errors.hoverIndex !== null) {
+    const tooltip = drawJournalErrorsHover(ctx, journalChartState.errors.model);
+    if (tooltip) domLabels.push(tooltip);
+  }
+  setCanvasDomLabels(canvas, domLabels);
+}
+
+function getJournalErrorsSegmentIndex(point, model) {
+  const dx = point.x - model.centerX;
+  const dy = point.y - model.centerY;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  if (distance < model.innerRadius || distance > model.radius + 8) return null;
+
+  let angle = Math.atan2(dy, dx);
+  if (angle < -Math.PI / 2) angle += Math.PI * 2;
+  return model.segments.find((segment) => angle >= segment.start && angle <= segment.end)?.index ?? null;
+}
+
+function drawJournalErrorsHover(ctx, model) {
+  const segment = model.segments.find((item) => item.index === journalChartState.errors.hoverIndex);
+  if (!segment) return null;
+  const middleAngle = (segment.start + segment.end) / 2;
+  const x = model.centerX + Math.cos(middleAngle) * model.radius;
+  const y = model.centerY + Math.sin(middleAngle) * model.radius;
+  const total = sum(model.segments.map((item) => item.row.count));
+  const percent = total ? (segment.row.count / total) * 100 : 0;
+  return getChartTooltipDomLabel(
+    x,
+    y,
+    segment.row.label,
+    [
+      { label: "Veces", value: String(segment.row.count), color: segment.row.color },
+      { label: "Peso", value: `${percent.toFixed(0)}%`, color: "var(--muted)" },
+    ],
+    model.canvas
+  );
+}
+
+function getJournalErrorRows(entries) {
+  const counts = new Map();
+  entries.forEach((entry) => {
+    sanitizeJournalErrors(entry.errors).forEach((error) => {
+      counts.set(error, (counts.get(error) || 0) + 1);
+    });
+  });
+  const knownRows = getJournalErrorTypes({ activeOnly: false })
+    .map((type) => ({
+      id: type.id,
+      label: type.label,
+      color: type.color,
+      count: counts.get(type.id) || 0,
+    }));
+  const knownIds = new Set(knownRows.map((row) => row.id));
+  counts.forEach((count, id) => {
+    if (!knownIds.has(id)) {
+      knownRows.push({ id, label: id, color: "#71717a", count });
+    }
+  });
+  return knownRows
+    .filter((row) => row.count > 0)
+    .sort((a, b) => b.count - a.count);
+}
+
+function renderJournalErrorSettings() {
+  const errorTypes = getJournalErrorTypes({ activeOnly: false });
+  if (!els.journalErrorTypesList) return;
+  els.journalErrorTypesList.innerHTML = errorTypes
+    .map((type) => {
+      const count = state.journalEntries.filter((entry) => sanitizeJournalErrors(entry.errors).includes(type.id)).length;
+      return `
+        <div class="journal-error-type-row${type.active ? "" : " is-archived"}">
+          <i style="--error-color: ${escapeHtml(type.color)}"></i>
+          <div>
+            <strong>${escapeHtml(type.label)}</strong>
+            <span>${count} ${count === 1 ? "entrada" : "entradas"}${type.active ? "" : " - oculto"}</span>
+          </div>
+          <div class="row-actions">
+            ${actionButton("edit-journal-error", type.id, "Editar", "pencil")}
+            ${actionButton(type.active ? "archive-journal-error" : "restore-journal-error", type.id, type.active ? "Ocultar" : "Activar", type.active ? "eye-off" : "eye")}
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+  refreshIcons();
+}
+
+function renderJournalErrorChoices(selectedErrors = getSelectedJournalErrors()) {
+  if (!els.journalErrorsOptions) return;
+  const selected = new Set(sanitizeJournalErrors(selectedErrors));
+  const activeTypes = getJournalErrorTypes({ activeOnly: false }).filter((type) => type.active || selected.has(type.id));
+  els.journalErrorsOptions.innerHTML = activeTypes.length
+    ? activeTypes
+        .map(
+          (type) => `
+            <label>
+              <input type="checkbox" name="journalErrors" value="${escapeHtml(type.id)}" ${selected.has(type.id) ? "checked" : ""} />
+              <i style="--error-color: ${escapeHtml(type.color)}"></i>
+              <span>${escapeHtml(type.label)}</span>
+            </label>
+          `
+        )
+        .join("")
+    : `<p class="journal-errors-empty">Anade errores desde el dashboard para marcarlos aqui.</p>`;
 }
 
 function getFilteredJournalEntries(options = {}) {
   const includePeriod = options.includePeriod !== false;
+  const includeSearch = options.includeSearch !== false;
   const includeSelectedDate = options.includeSelectedDate !== false;
   const firmFilter = els.journalFirmFilter.value || "all";
   const accountFilter = els.journalAccountFilter.value || "all";
   const period = els.journalPeriodFilter.value || "all";
   const { from, to } = includePeriod ? getPeriodDateRange(period) : { from: "", to: "" };
-  const search = normalize(els.journalSearch.value);
+  const search = includeSearch ? normalize(els.journalSearch.value) : "";
 
   return state.journalEntries
     .filter((entry) => firmFilter === "all" || entry.firmId === firmFilter)
@@ -1778,6 +2883,8 @@ function getFilteredJournalEntries(options = {}) {
         entry.notes,
         entry.lesson,
         entry.pnl,
+        entry.operationUrl,
+        sanitizeJournalErrors(entry.errors).map(getJournalErrorLabel).join(" "),
         journalSessionLabels[entry.sessionType],
         journalResultLabels[entry.result],
         journalEmotionLabels[entry.emotion],
@@ -1794,7 +2901,7 @@ function renderJournalCalendar() {
   const startOffset = (monthStart.getDay() + 6) % 7;
   const cursor = new Date(monthStart);
   cursor.setDate(cursor.getDate() - startOffset);
-  const entries = getFilteredJournalEntries({ includePeriod: false, includeSelectedDate: false });
+  const entries = getFilteredJournalEntries({ includePeriod: false, includeSearch: false, includeSelectedDate: false });
   const entriesByDate = new Map();
 
   entries.forEach((entry) => {
@@ -1913,11 +3020,25 @@ function journalCardHtml(entry) {
   const emotion = journalEmotionLabels[entry.emotion] || entry.emotion;
   const discipline = clamp(Math.round(Number(entry.discipline || 3)), 1, 5);
   const pnl = Number(entry.pnl || 0);
+  const errors = sanitizeJournalErrors(entry.errors);
   const notes = entry.notes
     ? `<p class="journal-text">${escapeHtml(entry.notes)}</p>`
     : "";
   const lesson = entry.lesson
     ? `<div class="journal-lesson"><span>Aprendizaje</span><p>${escapeHtml(entry.lesson)}</p></div>`
+    : "";
+  const operation = entry.operationUrl
+    ? `<a class="journal-operation-link" href="${escapeHtml(entry.operationUrl)}" target="_blank" rel="noreferrer">
+        <i data-lucide="external-link"></i>
+        <span>Ver operacion</span>
+      </a>`
+    : "";
+  const errorTags = errors.length
+    ? `
+        <div class="journal-error-tags">
+          ${errors.map((error) => `<span>${escapeHtml(getJournalErrorLabel(error))}</span>`).join("")}
+        </div>
+      `
     : "";
 
   return `
@@ -1939,6 +3060,8 @@ function journalCardHtml(entry) {
           <span class="badge journal-emotion">${escapeHtml(emotion)}</span>
         </div>
         <p class="journal-meta">${escapeHtml(firm?.name || "Sin firm")} - ${escapeHtml(account?.name || "Sin cuenta concreta")}</p>
+        ${operation}
+        ${errorTags}
         ${notes}
         ${lesson}
       </div>
@@ -2192,8 +3315,9 @@ function drawNetChart(transactions) {
   ctx.strokeStyle = palette.axis;
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(pad.left, zeroY);
-  ctx.lineTo(size.width - pad.right, zeroY);
+  const axisY = alignCanvasLine(zeroY, canvas);
+  ctx.moveTo(pad.left, axisY);
+  ctx.lineTo(size.width - pad.right, axisY);
   ctx.stroke();
 
   drawSeriesLine(ctx, series, "expense", xFor, yFor, palette.red, 2);
@@ -2418,7 +3542,7 @@ function drawDateGuides(ctx, canvas, ticks, xFor, palette) {
   ctx.lineWidth = 1;
 
   ticks.forEach((tick) => {
-    const x = xFor(tick.index);
+    const x = alignCanvasLine(xFor(tick.index), canvas);
     ctx.beginPath();
     ctx.moveTo(x, top);
     ctx.lineTo(x, bottom);
@@ -2554,15 +3678,18 @@ function setupCanvas(canvas, ctx) {
   const rect = canvas.getBoundingClientRect();
   const width = Math.max(1, Math.round(rect.width));
   const height = Math.max(1, Math.round(rect.height));
-  const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
+  const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 4));
   const pixelWidth = Math.max(1, Math.round(width * dpr));
   const pixelHeight = Math.max(1, Math.round(height * dpr));
 
   canvas.chartWidth = width;
   canvas.chartHeight = height;
+  canvas.chartDpr = dpr;
   if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
   if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
 }
 
 function chartSize(canvas) {
@@ -2570,6 +3697,70 @@ function chartSize(canvas) {
     height: canvas.chartHeight || canvas.getBoundingClientRect().height || canvas.height,
     width: canvas.chartWidth || canvas.getBoundingClientRect().width || canvas.width,
   };
+}
+
+function alignCanvasLine(value, canvas, lineWidth = 1) {
+  const dpr = canvas?.chartDpr || Math.max(1, window.devicePixelRatio || 1);
+  const physicalWidth = Math.max(1, Math.round(lineWidth * dpr));
+  const physicalValue = Math.round(value * dpr);
+  const offset = physicalWidth % 2 === 1 ? 0.5 : 0;
+  return (physicalValue + offset) / dpr;
+}
+
+function setCanvasDomLabels(canvas, items = []) {
+  const wrap = canvas?.parentElement;
+  if (!wrap || typeof document.createElement !== "function") return;
+  let layer = wrap.querySelector(".canvas-dom-layer");
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.className = "canvas-dom-layer";
+    wrap.appendChild(layer);
+  }
+  layer.innerHTML = "";
+  items.filter(Boolean).forEach((item) => {
+    const element = document.createElement("div");
+    element.className = `canvas-dom-item ${item.kind ? `is-${item.kind}` : ""} ${item.className || ""}`;
+    element.style.left = `${Math.round(item.x)}px`;
+    element.style.top = `${Math.round(item.y)}px`;
+    element.dataset.anchor = item.anchor || "";
+
+    if (item.kind === "tooltip") {
+      renderCanvasDomTooltip(element, item);
+    } else if (item.kind === "center") {
+      element.innerHTML = `<strong>${escapeHtml(item.value)}</strong><span>${escapeHtml(item.label)}</span>`;
+    } else {
+      element.textContent = item.text || "";
+    }
+    layer.appendChild(element);
+  });
+}
+
+function clearCanvasDomLabels(canvas) {
+  const layer = canvas?.parentElement?.querySelector(".canvas-dom-layer");
+  if (layer) layer.innerHTML = "";
+}
+
+function renderCanvasDomTooltip(element, item) {
+  element.innerHTML = `
+    <strong>${escapeHtml(item.title)}</strong>
+    ${item.rows
+      .map(
+        (row) => `
+          <span class="chart-tooltip-row">
+            <i style="--tooltip-color: ${escapeHtml(row.color)}"></i>
+            <em>${escapeHtml(row.label)}</em>
+            <b>${escapeHtml(row.value)}</b>
+          </span>
+        `
+      )
+      .join("")}
+  `;
+}
+
+function canDrawCanvas(canvas, minSize = 24) {
+  if (!canvas) return false;
+  const rect = canvas.getBoundingClientRect();
+  return rect.width >= minSize && rect.height >= minSize;
 }
 
 function chartPadding(canvas) {
@@ -2583,7 +3774,7 @@ function chartPadding(canvas) {
   };
 }
 
-function drawGrid(ctx, canvas, min, max) {
+function drawGrid(ctx, canvas, min, max, formatter = formatAxisMoney) {
   const palette = chartPalette();
   const pad = chartPadding(canvas);
   const size = chartSize(canvas);
@@ -2593,19 +3784,21 @@ function drawGrid(ctx, canvas, min, max) {
   ctx.strokeStyle = palette.grid;
   ctx.lineWidth = 1;
   for (let i = 0; i <= lines; i += 1) {
-    const y = top + (i / lines) * (bottom - top);
+    const y = alignCanvasLine(top + (i / lines) * (bottom - top), canvas);
     ctx.beginPath();
     ctx.moveTo(pad.left, y);
     ctx.lineTo(size.width - pad.right, y);
     ctx.stroke();
   }
 
+  if (!formatter) return;
+
   ctx.fillStyle = palette.muted;
   ctx.font = "11.5px system-ui, sans-serif";
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
-  ctx.fillText(formatAxisMoney(max), pad.left - 8, top);
-  ctx.fillText(formatAxisMoney(min), pad.left - 8, bottom);
+  ctx.fillText(formatter(max), pad.left - 8, top);
+  ctx.fillText(formatter(min), pad.left - 8, bottom);
   ctx.textBaseline = "alphabetic";
 }
 
@@ -2636,6 +3829,7 @@ function openFirmDialog(firm = null) {
   els.firmType.value = firm?.type || "Futuros";
   els.firmNotes.value = firm?.notes || "";
   els.firmDialogTitle.textContent = firm ? "Editar firm" : "Nueva firm";
+  syncAllCustomSelects();
   showDialog(els.firmDialog);
 }
 
@@ -2656,6 +3850,7 @@ function openAccountDialog(account = null) {
   els.accountPurchasedAt.value = account?.purchasedAt || today();
   els.accountNotes.value = account?.notes || "";
   els.accountDialogTitle.textContent = account ? "Editar cuenta" : "Nueva cuenta";
+  syncAllCustomSelects();
   showDialog(els.accountDialog);
 }
 
@@ -2678,6 +3873,7 @@ function openTransactionDialog(transaction = null) {
   fillAccountSelect(els.transactionAccount, firmId, true, transaction?.accountId || "");
   els.transactionNote.value = transaction?.note || "";
   els.transactionDialogTitle.textContent = transaction ? "Editar movimiento" : "Nuevo movimiento";
+  syncAllCustomSelects();
   showDialog(els.transactionDialog);
 }
 
@@ -2702,10 +3898,28 @@ function openJournalDialog(entry = null) {
   els.journalEmotion.value = entry?.emotion || "focused";
   els.journalDiscipline.value = String(entry?.discipline || 3);
   els.journalPnl.value = entry ? Number(entry.pnl || 0) : "";
+  els.journalOperationUrl.value = entry?.operationUrl || "";
+  renderJournalErrorChoices(entry?.errors || []);
+  setJournalErrorFields(entry?.errors || []);
   els.journalNotes.value = entry?.notes || "";
   els.journalLesson.value = entry?.lesson || "";
   els.journalDialogTitle.textContent = entry ? "Editar entrada" : "Nueva entrada";
+  syncAllCustomSelects();
   showDialog(els.journalDialog);
+}
+
+function openJournalErrorDialog(type = null) {
+  els.journalErrorForm.reset();
+  els.journalErrorTypeId.value = type?.id || "";
+  els.journalErrorLabel.value = type?.label || "";
+  els.journalErrorColor.value = normalizeHexColor(type?.color) || "#3b82f6";
+  els.journalErrorDialogTitle.textContent = type ? "Editar error" : "Nuevo error";
+  showDialog(els.journalErrorDialog);
+}
+
+function openJournalErrorManagerDialog() {
+  renderJournalErrorSettings();
+  showDialog(els.journalErrorManagerDialog);
 }
 
 function clearFormValidity(form) {
@@ -2720,7 +3934,8 @@ function markInvalid(field, message) {
     field.reportValidity?.();
     field.addEventListener?.("input", () => field.setCustomValidity?.(""), { once: true });
     field.addEventListener?.("change", () => field.setCustomValidity?.(""), { once: true });
-    field.focus?.();
+    const customSelectButton = field.matches?.("select") ? field.closest(".select-shell")?.querySelector(".select-display") : null;
+    (customSelectButton || field).focus?.();
   }
   toast(message);
   return false;
@@ -2828,6 +4043,13 @@ function validateJournalEntry(entry, selectedAccountId, account) {
     return markInvalid(els.journalDiscipline, "La disciplina debe estar entre 1 y 5.");
   }
   if (!Number.isFinite(entry.pnl)) return markInvalid(els.journalPnl, "El P&L debe ser un numero valido.");
+  if (entry.operationUrl && !isValidUrl(entry.operationUrl)) {
+    return markInvalid(els.journalOperationUrl, "Pon un enlace valido para la operacion.");
+  }
+  if (entry.errors.some((error) => !getJournalErrorType(error))) {
+    toast("Hay un error de journal no valido.");
+    return false;
+  }
   return true;
 }
 
@@ -3000,6 +4222,8 @@ async function saveJournalFromForm(event) {
   const selectedAccountId = els.journalAccount.value;
   const account = selectedAccountId ? getAccount(selectedAccountId) : null;
   const pnl = parseSignedAmount(els.journalPnl.value);
+  const errors = getSelectedJournalErrors();
+  const operationUrl = els.journalOperationUrl.value.trim();
   const entry = {
     id,
     date: els.journalDate.value,
@@ -3011,6 +4235,8 @@ async function saveJournalFromForm(event) {
     emotion: els.journalEmotion.value,
     discipline: Number(els.journalDiscipline.value),
     pnl,
+    errors,
+    operationUrl,
     notes: els.journalNotes.value.trim(),
     lesson: els.journalLesson.value.trim(),
     createdAt: existing?.createdAt || nowIso(),
@@ -3023,7 +4249,7 @@ async function saveJournalFromForm(event) {
   try {
     const result = await supabaseClient.from("journal_entries").upsert(journalEntryToDb(entry)).select().single();
     if (result.error && isJournalSetupError(result.error)) {
-      throw new Error("Ejecuta supabase-journal.sql en Supabase para guardar P&L en el journal.");
+      throw new Error("Ejecuta supabase-journal.sql en Supabase para actualizar el journal.");
     }
     throwIfSupabaseError(result);
     const savedEntry = fromDbJournalEntry(result.data);
@@ -3045,6 +4271,66 @@ async function saveJournalFromForm(event) {
   }
 }
 
+async function saveJournalErrorTypeFromForm(event) {
+  event.preventDefault();
+  if (!currentUser) return toast("Inicia sesion para guardar.");
+  if (isFormBusy(els.journalErrorForm)) return;
+  clearFormValidity(els.journalErrorForm);
+
+  const id = els.journalErrorTypeId.value || createId();
+  const existing = getJournalErrorType(id);
+  const label = els.journalErrorLabel.value.trim();
+  const color = normalizeHexColor(els.journalErrorColor.value) || "#3b82f6";
+  const duplicated = getJournalErrorTypes({ activeOnly: false }).some(
+    (type) => type.id !== id && normalize(type.label) === normalize(label)
+  );
+
+  if (label.length < 2) return markInvalid(els.journalErrorLabel, "Pon un nombre para el error.");
+  if (duplicated) return markInvalid(els.journalErrorLabel, "Ya existe un error con ese nombre.");
+
+  const type = {
+    id,
+    label,
+    color,
+    position: existing?.position ?? getJournalErrorTypes({ activeOnly: false }).length,
+    active: true,
+    createdAt: existing?.createdAt || nowIso(),
+    updatedAt: nowIso(),
+  };
+
+  setFormBusy(els.journalErrorForm, true);
+  try {
+    const result = await supabaseClient
+      .from("journal_error_types")
+      .upsert(journalErrorTypeToDb(type), { onConflict: "user_id,id" })
+      .select()
+      .single();
+    if (result.error && isMissingJournalErrorTypesTableError(result.error)) {
+      throw new Error("Ejecuta supabase-journal.sql en Supabase para personalizar errores.");
+    }
+    throwIfSupabaseError(result);
+    const savedType = fromDbJournalErrorType(result.data);
+
+    if (existing) {
+      state.journalErrorTypes = getJournalErrorTypes({ activeOnly: false }).map((item) =>
+        item.id === id ? savedType : item
+      );
+    } else {
+      state.journalErrorTypes = [...getJournalErrorTypes({ activeOnly: false }), savedType];
+    }
+
+    state.journalErrorTypes = normalizeJournalErrorTypes(state.journalErrorTypes);
+    persist();
+    closeDialog("journalErrorDialog");
+    refreshAll();
+    toast("Error guardado.");
+  } catch (error) {
+    toast(error.message || "No se pudo guardar el error.");
+  } finally {
+    setFormBusy(els.journalErrorForm, false);
+  }
+}
+
 function handleTableAction(event) {
   const button = event.target.closest("[data-action]");
   if (!button) return;
@@ -3055,10 +4341,42 @@ function handleTableAction(event) {
   if (action === "edit-account") openAccountDialog(getAccount(id));
   if (action === "edit-transaction") openTransactionDialog(getTransaction(id));
   if (action === "edit-journal") openJournalDialog(getJournalEntry(id));
+  if (action === "edit-journal-error") openJournalErrorDialog(getJournalErrorType(id));
+  if (action === "archive-journal-error") requestToggleJournalErrorType(id, false);
+  if (action === "restore-journal-error") requestToggleJournalErrorType(id, true);
   if (action === "delete-firm") requestDeleteFirm(id);
   if (action === "delete-account") requestDeleteAccount(id);
   if (action === "delete-transaction") requestDeleteTransaction(id);
   if (action === "delete-journal") requestDeleteJournalEntry(id);
+}
+
+function requestToggleJournalErrorType(id, active) {
+  const type = getJournalErrorType(id);
+  if (!type) return;
+  const actionLabel = active ? "activar" : "ocultar";
+  openConfirm(active ? "Activar error" : "Ocultar error", `Quieres ${actionLabel} "${type.label}"?`, async () => {
+    const nextType = { ...type, active, updatedAt: nowIso() };
+    try {
+      const result = await supabaseClient
+        .from("journal_error_types")
+        .upsert(journalErrorTypeToDb(nextType), { onConflict: "user_id,id" })
+        .select()
+        .single();
+      if (result.error && isMissingJournalErrorTypesTableError(result.error)) {
+        throw new Error("Ejecuta supabase-journal.sql en Supabase para personalizar errores.");
+      }
+      throwIfSupabaseError(result);
+      const savedType = fromDbJournalErrorType(result.data);
+      state.journalErrorTypes = getJournalErrorTypes({ activeOnly: false }).map((item) =>
+        item.id === id ? savedType : item
+      );
+      persist();
+      refreshAll();
+      toast(active ? "Error activado." : "Error ocultado.");
+    } catch (error) {
+      toast(error.message || "No se pudo actualizar el error.");
+    }
+  });
 }
 
 function requestDeleteFirm(id) {
@@ -3224,6 +4542,7 @@ function importJson(event) {
           accounts: imported.accounts,
           transactions: imported.transactions,
           journalEntries: Array.isArray(imported.journalEntries) ? imported.journalEntries : [],
+          journalErrorTypes: normalizeJournalErrorTypes(imported.journalErrorTypes),
         };
         persist();
         refreshAll();
@@ -3260,6 +4579,11 @@ async function replaceCloudState(imported) {
   if (!currentUser) throw new Error("Inicia sesion para importar datos.");
 
   const mapped = remapStateForCloud(imported);
+  const deleteJournalErrorTypes = await supabaseClient.from("journal_error_types").delete().eq("user_id", currentUser.id);
+  const hasJournalErrorTypesTable = !deleteJournalErrorTypes.error;
+  if (deleteJournalErrorTypes.error && !isMissingJournalErrorTypesTableError(deleteJournalErrorTypes.error)) {
+    throwIfSupabaseError(deleteJournalErrorTypes);
+  }
   const deleteJournalEntries = await supabaseClient.from("journal_entries").delete().eq("user_id", currentUser.id);
   const hasJournalTable = handleJournalTableResult(deleteJournalEntries, mapped.journalEntries.length > 0);
   const deleteTransactions = await supabaseClient.from("transactions").delete().eq("user_id", currentUser.id);
@@ -3279,6 +4603,10 @@ async function replaceCloudState(imported) {
   }
   if (mapped.transactions.length) {
     const result = await supabaseClient.from("transactions").insert(mapped.transactions.map(transactionToDb));
+    throwIfSupabaseError(result);
+  }
+  if (mapped.journalErrorTypes.length && hasJournalErrorTypesTable) {
+    const result = await supabaseClient.from("journal_error_types").insert(mapped.journalErrorTypes.map(journalErrorTypeToDb));
     throwIfSupabaseError(result);
   }
   if (mapped.journalEntries.length && hasJournalTable) {
@@ -3348,6 +4676,8 @@ function remapStateForCloud(imported) {
     })
     .filter((transaction) => transaction.firmId);
 
+  const journalErrorTypes = normalizeJournalErrorTypes(imported.journalErrorTypes);
+  const knownErrorIds = new Set(journalErrorTypes.map((type) => type.id));
   const journalEntries = (Array.isArray(imported.journalEntries) ? imported.journalEntries : [])
     .filter((entry) => entry?.date && entry?.title)
     .map((entry) => {
@@ -3365,6 +4695,8 @@ function remapStateForCloud(imported) {
         emotion: journalEmotionLabels[entry.emotion] ? entry.emotion : "focused",
         discipline: clamp(Math.round(Number(entry.discipline || 3)), 1, 5),
         pnl: Number(entry.pnl || 0),
+        errors: sanitizeJournalErrors(entry.errors).filter((error) => knownErrorIds.has(error)),
+        operationUrl: entry.operationUrl || "",
         notes: entry.notes || "",
         lesson: entry.lesson || "",
         createdAt: entry.createdAt || nowIso(),
@@ -3373,7 +4705,7 @@ function remapStateForCloud(imported) {
     })
     .filter((entry) => entry.firmId);
 
-  return { firms, accounts, transactions, journalEntries };
+  return { firms, accounts, transactions, journalEntries, journalErrorTypes };
 }
 
 function maybeCreateLocalMigrationBackup() {
@@ -3485,6 +4817,21 @@ function formatSignedMoney(value) {
   return formatMoney(0);
 }
 
+function formatTradingMoney(value) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0));
+}
+
+function formatSignedTradingMoney(value) {
+  const amount = Number(value || 0);
+  if (amount > 0) return `+${formatTradingMoney(amount)}`;
+  if (amount < 0) return `-${formatTradingMoney(Math.abs(amount))}`;
+  return formatTradingMoney(0);
+}
+
 function formatAxisMoney(value) {
   return new Intl.NumberFormat("es-ES", {
     style: "currency",
@@ -3498,6 +4845,57 @@ function formatPercent(value) {
     maximumFractionDigits: 2,
     minimumFractionDigits: 2,
   }).format(Number(value || 0))}%`;
+}
+
+function formatSignedPercent(value) {
+  const amount = Number(value || 0);
+  const formatted = formatPercent(Math.abs(amount));
+  if (amount > 0) return `+${formatted}`;
+  if (amount < 0) return `-${formatted}`;
+  return formatted;
+}
+
+function parseAccountSizeAmount(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+
+  const match = text.match(/(\d[\d.,]*)\s*([km])?/i);
+  if (!match) return null;
+
+  const numericText = match[1];
+  const suffix = (match[2] || "").toLowerCase();
+  const decimal = normalizeFlexibleNumber(numericText);
+  if (!Number.isFinite(decimal) || decimal <= 0) return null;
+
+  const multiplier = suffix === "m" ? 1000000 : suffix === "k" ? 1000 : 1;
+  return decimal * multiplier;
+}
+
+function normalizeFlexibleNumber(value) {
+  const text = String(value || "").replace(/[^\d.,-]/g, "");
+  if (!text) return NaN;
+  const lastComma = text.lastIndexOf(",");
+  const lastDot = text.lastIndexOf(".");
+
+  if (lastComma !== -1 && lastDot !== -1) {
+    const decimalSeparator = lastComma > lastDot ? "," : ".";
+    const thousandsSeparator = decimalSeparator === "," ? "." : ",";
+    return Number(text.replaceAll(thousandsSeparator, "").replace(decimalSeparator, "."));
+  }
+
+  if (lastComma !== -1) {
+    const parts = text.split(",");
+    const isThousands = parts.length > 1 && parts.at(-1)?.length === 3;
+    return Number(isThousands ? parts.join("") : text.replace(",", "."));
+  }
+
+  if (lastDot !== -1) {
+    const parts = text.split(".");
+    const isThousands = parts.length > 1 && parts.at(-1)?.length === 3;
+    return Number(isThousands ? parts.join("") : text);
+  }
+
+  return Number(text);
 }
 
 function formatDate(value) {
@@ -3595,6 +4993,72 @@ function normalize(value) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
+}
+
+function normalizeJournalErrorTypes(value) {
+  const raw = Array.isArray(value) && value.length ? value : cloneDefaultJournalErrorTypes();
+  const seen = new Set();
+  return raw
+    .map((type, index) => ({
+      id: String(type?.id || createId()),
+      label: String(type?.label || "").trim(),
+      color: normalizeHexColor(type?.color) || "#3b82f6",
+      position: Number.isFinite(Number(type?.position)) ? Number(type.position) : index,
+      active: type?.active !== false,
+      createdAt: type?.createdAt || nowIso(),
+      updatedAt: type?.updatedAt || type?.createdAt || nowIso(),
+    }))
+    .filter((type) => {
+      if (!type.label || seen.has(type.id)) return false;
+      seen.add(type.id);
+      return true;
+    })
+    .sort((a, b) => a.position - b.position || a.label.localeCompare(b.label, "es"));
+}
+
+function getJournalErrorTypes(options = {}) {
+  const types = normalizeJournalErrorTypes(state.journalErrorTypes);
+  return options.activeOnly ? types.filter((type) => type.active) : types;
+}
+
+function getJournalErrorType(id) {
+  return getJournalErrorTypes({ activeOnly: false }).find((type) => type.id === id) || null;
+}
+
+function getJournalErrorLabel(id) {
+  return getJournalErrorType(id)?.label || id;
+}
+
+function sanitizeJournalErrors(value) {
+  const raw = Array.isArray(value) ? value : [];
+  return [...new Set(raw.map((item) => String(item).trim()).filter(Boolean))];
+}
+
+function getSelectedJournalErrors() {
+  return sanitizeJournalErrors(
+    Array.from(document.querySelectorAll('input[name="journalErrors"]:checked')).map((input) => input.value)
+  );
+}
+
+function setJournalErrorFields(errors) {
+  const selected = new Set(sanitizeJournalErrors(errors));
+  document.querySelectorAll('input[name="journalErrors"]').forEach((input) => {
+    input.checked = selected.has(input.value);
+  });
+}
+
+function normalizeHexColor(value) {
+  const color = String(value || "").trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : "";
+}
+
+function isValidUrl(value) {
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol);
+  } catch {
+    return false;
+  }
 }
 
 function pnlToneClass(value) {
