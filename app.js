@@ -105,11 +105,14 @@ let activeSection = pillarDefaultSections[activePillar] || "overview";
 let journalView = getInitialJournalView();
 let journalCalendarMonth = today().slice(0, 7);
 let journalSelectedDate = "";
+let journalDashboardLayoutFrame = 0;
 const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const NET_CHART_MIN_VISIBLE_POINTS = 6;
 const NET_CHART_PAN_STEP = 0.12;
 const JOURNAL_CHART_MIN_VISIBLE_POINTS = 6;
 const JOURNAL_CHART_PAN_STEP = 0.12;
+const JOURNAL_OPERATION_IMAGE_MAX_SIZE = 1200;
+const JOURNAL_OPERATION_IMAGE_QUALITY = 0.82;
 
 const netChartState = {
   dragStartView: null,
@@ -309,15 +312,19 @@ function bindElements() {
     "journalDialogTitle",
     "journalId",
     "journalDate",
-    "journalSessionType",
     "journalFirm",
     "journalAccount",
     "journalTitle",
-    "journalResult",
     "journalEmotion",
     "journalDiscipline",
     "journalPnl",
     "journalOperationUrl",
+    "journalOperationImageInput",
+    "journalOperationDropzone",
+    "journalOperationMediaText",
+    "journalOperationPreview",
+    "journalOperationImage",
+    "journalOperationClear",
     "journalErrorsOptions",
     "journalNotes",
     "journalLesson",
@@ -395,6 +402,9 @@ function bindEvents() {
   document.querySelectorAll("[data-close-dialog]").forEach((button) => {
     button.addEventListener("click", () => closeDialog(button.dataset.closeDialog));
   });
+  document.querySelectorAll("dialog").forEach((dialog) => {
+    dialog.addEventListener("close", clearJournalCardFocus);
+  });
 
   els.firmForm.addEventListener("submit", saveFirmFromForm);
   els.accountForm.addEventListener("submit", saveAccountFromForm);
@@ -403,6 +413,25 @@ function bindEvents() {
   els.journalErrorForm.addEventListener("submit", saveJournalErrorTypeFromForm);
   els.addJournalErrorButton.addEventListener("click", () => openJournalErrorDialog());
   els.manageJournalErrorsButton.addEventListener("click", openJournalErrorManagerDialog);
+  els.journalOperationDropzone.addEventListener("click", () => els.journalOperationImageInput.click());
+  els.journalOperationDropzone.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      els.journalOperationImageInput.click();
+    }
+  });
+  els.journalOperationDropzone.addEventListener("paste", handleJournalOperationPaste);
+  els.journalForm.addEventListener("paste", handleJournalOperationPaste);
+  els.journalOperationDropzone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    els.journalOperationDropzone.classList.add("is-dragging");
+  });
+  els.journalOperationDropzone.addEventListener("dragleave", () => {
+    els.journalOperationDropzone.classList.remove("is-dragging");
+  });
+  els.journalOperationDropzone.addEventListener("drop", handleJournalOperationDrop);
+  els.journalOperationImageInput.addEventListener("change", handleJournalOperationFileInput);
+  els.journalOperationClear.addEventListener("click", clearJournalOperationMedia);
 
   els.transactionKind.addEventListener("change", () => {
     fillTransactionCategories(els.transactionKind.value, els.transactionCategory.value);
@@ -461,6 +490,7 @@ function bindEvents() {
   els.transactionsTableBody.addEventListener("click", handleTableAction);
   els.journalCalendarGrid.addEventListener("click", handleTableAction);
   els.journalEntriesList.addEventListener("click", handleTableAction);
+  els.journalEntriesList.addEventListener("keydown", handleJournalCardKeyDown);
   els.journalErrorTypesList.addEventListener("click", handleTableAction);
 
   document.getElementById("exportJsonButton").addEventListener("click", exportJson);
@@ -750,6 +780,129 @@ function handleJournalErrorsPointerLeave() {
   stateForChart.hoverIndex = null;
   stateForChart.pointer = null;
   requestJournalChartRedraw("errors");
+}
+
+async function handleJournalOperationPaste(event) {
+  const file = getImageFileFromDataTransfer(event.clipboardData);
+  if (!file) return;
+  event.preventDefault();
+  await setJournalOperationImage(file);
+}
+
+async function handleJournalOperationDrop(event) {
+  event.preventDefault();
+  els.journalOperationDropzone.classList.remove("is-dragging");
+  const file = getImageFileFromDataTransfer(event.dataTransfer);
+  if (!file) return toast("Pega o arrastra una imagen valida.");
+  await setJournalOperationImage(file);
+}
+
+async function handleJournalOperationFileInput(event) {
+  const file = Array.from(event.target.files || []).find((item) => item.type.startsWith("image/"));
+  event.target.value = "";
+  if (!file) return;
+  await setJournalOperationImage(file);
+}
+
+function getImageFileFromDataTransfer(dataTransfer) {
+  return Array.from(dataTransfer?.files || []).find((file) => file.type.startsWith("image/")) || null;
+}
+
+async function setJournalOperationImage(file) {
+  try {
+    const dataUrl = await compressJournalOperationImage(file);
+    setJournalOperationMedia(dataUrl);
+  } catch (error) {
+    toast(error.message || "No se pudo cargar la captura.");
+  }
+}
+
+function clearJournalOperationMedia() {
+  setJournalOperationMedia("");
+}
+
+function setJournalOperationMedia(value = "") {
+  const media = String(value || "");
+  els.journalOperationUrl.value = media;
+  const isImage = isImageDataUrl(media);
+
+  els.journalOperationClear.hidden = !media;
+  els.journalOperationPreview.hidden = !isImage;
+  els.journalOperationMediaText.hidden = isImage;
+
+  if (isImage) {
+    els.journalOperationImage.src = media;
+  } else {
+    els.journalOperationImage.removeAttribute("src");
+  }
+
+  if (!media) {
+    els.journalOperationMediaText.innerHTML = `
+      <i data-lucide="image-plus"></i>
+      <span>Pega una imagen, arrastrala aqui o haz clic para subirla.</span>
+    `;
+  } else if (!isImage) {
+    els.journalOperationMediaText.innerHTML = `
+      <i data-lucide="external-link"></i>
+      <span>Enlace de operacion guardado.</span>
+    `;
+  }
+  refreshIcons();
+}
+
+async function compressJournalOperationImage(file) {
+  if (!file?.type?.startsWith("image/")) {
+    throw new Error("El archivo debe ser una imagen.");
+  }
+
+  const source = await readImageFile(file);
+  const { width, height } = source;
+  const scale = Math.min(1, JOURNAL_OPERATION_IMAGE_MAX_SIZE / Math.max(width, height));
+  const targetWidth = Math.max(1, Math.round(width * scale));
+  const targetHeight = Math.max(1, Math.round(height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(source, 0, 0, targetWidth, targetHeight);
+  closeImageSource(source);
+
+  const blob = await new Promise((resolve) => {
+    canvas.toBlob(resolve, "image/jpeg", JOURNAL_OPERATION_IMAGE_QUALITY);
+  });
+  if (!blob) throw new Error("No se pudo procesar la imagen.");
+  return blobToDataUrl(blob);
+}
+
+async function readImageFile(file) {
+  if ("createImageBitmap" in window) {
+    return createImageBitmap(file);
+  }
+
+  const dataUrl = await blobToDataUrl(file);
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("No se pudo leer la imagen."));
+    image.src = dataUrl;
+  });
+}
+
+function closeImageSource(source) {
+  if (typeof source?.close === "function") source.close();
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("No se pudo leer la imagen."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function isImageDataUrl(value) {
+  return /^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(String(value || ""));
 }
 
 function bindNetChartEvents() {
@@ -1116,9 +1269,7 @@ async function fetchJournalErrorTypes() {
     throw result.error;
   }
 
-  const errorTypes = normalizeJournalErrorTypes((result.data || []).map(fromDbJournalErrorType));
-  if (errorTypes.length) return errorTypes;
-  return seedDefaultJournalErrorTypes();
+  return ensureDefaultJournalErrorTypes((result.data || []).map(fromDbJournalErrorType));
 }
 
 async function seedDefaultJournalErrorTypes() {
@@ -1136,6 +1287,29 @@ async function seedDefaultJournalErrorTypes() {
     throw result.error;
   }
   return normalizeJournalErrorTypes((result.data || []).map(fromDbJournalErrorType));
+}
+
+async function ensureDefaultJournalErrorTypes(existingTypes) {
+  const existing = normalizeJournalErrorTypes(existingTypes, { includeDefaults: false });
+  const existingIds = new Set(existing.map((type) => type.id));
+  const missingDefaults = cloneDefaultJournalErrorTypes().filter((type) => !existingIds.has(type.id));
+
+  if (!missingDefaults.length) return normalizeJournalErrorTypes(existing);
+  if (!currentUser || !supabaseClient) return normalizeJournalErrorTypes(existing);
+
+  const result = await supabaseClient
+    .from("journal_error_types")
+    .upsert(missingDefaults.map(journalErrorTypeToDb), { onConflict: "user_id,id" })
+    .select("*")
+    .order("position", { ascending: true })
+    .order("label", { ascending: true });
+
+  if (result.error) {
+    if (isMissingJournalErrorTypesTableError(result.error)) return normalizeJournalErrorTypes(existing);
+    throw result.error;
+  }
+
+  return normalizeJournalErrorTypes([...existing, ...(result.data || []).map(fromDbJournalErrorType)]);
 }
 
 function isMissingJournalTableError(error) {
@@ -1503,6 +1677,10 @@ function setActiveSection(section) {
   updateNavigationState();
   els.pageTitle.textContent = titles[section] || "Panel";
   drawCharts(getDashboardSummary());
+  if (section === "journal") {
+    renderJournalApp();
+    scheduleJournalDashboardChartRender();
+  }
 }
 
 function updateJournalPanelHeading() {
@@ -1776,7 +1954,7 @@ function getDashboardPeriodLabel(filters) {
     "current-month": "Mes actual",
     "last-30": "Ultimos 30 dias",
     "last-90": "Ultimos 90 dias",
-    year: "Este ano",
+    year: "Este año",
     custom:
       filters.from || filters.to
         ? `${filters.from ? formatDate(filters.from) : "Inicio"} - ${filters.to ? formatDate(filters.to) : "Hoy"}`
@@ -2090,7 +2268,7 @@ function renderAccountsTable() {
             </div>
           </td>
           <td data-label="Firm">${escapeHtml(firm?.name || "Sin firm")}</td>
-          <td data-label="Tamano">${escapeHtml(account.size || "-")}</td>
+          <td data-label="Tamaño">${escapeHtml(account.size || "-")}</td>
           <td data-label="Estado"><span class="badge ${account.status}">${statusLabels[account.status] || account.status}</span></td>
           <td data-label="Compra">${formatDate(account.purchasedAt)}</td>
           <td data-label="Gastos" class="amount negative">${formatMoney(expenses)}</td>
@@ -2232,10 +2410,31 @@ function renderJournalDashboard() {
   drawJournalDisciplineChart(entries);
   renderJournalErrorSettings();
   renderJournalCalendar();
+  scheduleJournalDashboardChartRender();
 }
 
 function getJournalDashboardEntries() {
   return getFilteredJournalEntries({ includePeriod: false, includeSearch: false, includeSelectedDate: false });
+}
+
+function scheduleJournalDashboardChartRender(attempt = 0) {
+  if (journalDashboardLayoutFrame) return;
+  journalDashboardLayoutFrame = requestAnimationFrame(() => {
+    journalDashboardLayoutFrame = 0;
+    if (activeSection !== "journal" || journalView !== "dashboard") return;
+
+    const canvases = [els.journalPnlChart, els.journalErrorsChart, els.journalDisciplineChart].filter(Boolean);
+    const hasPendingLayout = canvases.some((canvas) => !canDrawCanvas(canvas));
+    const entries = getJournalDashboardEntries();
+
+    drawJournalPnlChart(entries);
+    drawJournalErrorsChart(entries);
+    drawJournalDisciplineChart(entries);
+
+    if (hasPendingLayout && attempt < 6) {
+      scheduleJournalDashboardChartRender(attempt + 1);
+    }
+  });
 }
 
 function renderJournalAccountOverview(entries) {
@@ -2253,7 +2452,7 @@ function renderJournalAccountOverview(entries) {
   const returnPercent = Number.isFinite(base) && base > 0 ? (netPnl / base) * 100 : null;
 
   els.journalAccountOverview.hidden = false;
-  els.journalAccountOverviewName.textContent = [account?.name || "Cuenta", firm?.name].filter(Boolean).join(" · ");
+  els.journalAccountOverviewName.textContent = [account?.name || "Cuenta", firm?.name].filter(Boolean).join(" - ");
   els.journalAccountOverviewBase.textContent = Number.isFinite(base)
     ? `Base ${formatTradingMoney(base)}`
     : "Anade tamano de cuenta para calcular %";
@@ -3015,11 +3214,12 @@ function renderJournalEntries() {
 function journalCardHtml(entry) {
   const firm = getFirm(entry.firmId);
   const account = getAccount(entry.accountId);
-  const result = journalResultLabels[entry.result] || entry.result;
-  const session = journalSessionLabels[entry.sessionType] || entry.sessionType;
   const emotion = journalEmotionLabels[entry.emotion] || entry.emotion;
   const discipline = clamp(Math.round(Number(entry.discipline || 3)), 1, 5);
   const pnl = Number(entry.pnl || 0);
+  const tone = pnlToneClass(pnl);
+  const statusIcon = pnl > 0 ? "check" : pnl < 0 ? "x" : "minus";
+  const statusLabel = pnl > 0 ? "Ganancia" : pnl < 0 ? "Perdida" : "Break even";
   const errors = sanitizeJournalErrors(entry.errors);
   const notes = entry.notes
     ? `<p class="journal-text">${escapeHtml(entry.notes)}</p>`
@@ -3027,12 +3227,7 @@ function journalCardHtml(entry) {
   const lesson = entry.lesson
     ? `<div class="journal-lesson"><span>Aprendizaje</span><p>${escapeHtml(entry.lesson)}</p></div>`
     : "";
-  const operation = entry.operationUrl
-    ? `<a class="journal-operation-link" href="${escapeHtml(entry.operationUrl)}" target="_blank" rel="noreferrer">
-        <i data-lucide="external-link"></i>
-        <span>Ver operacion</span>
-      </a>`
-    : "";
+  const media = getJournalGalleryMediaHtml(entry.operationUrl, entry.title);
   const errorTags = errors.length
     ? `
         <div class="journal-error-tags">
@@ -3042,35 +3237,80 @@ function journalCardHtml(entry) {
     : "";
 
   return `
-    <article class="journal-card">
-      <div class="journal-card-main">
-        <div class="journal-card-head">
+    <article
+      class="journal-card ${tone}"
+      tabindex="0"
+      data-action="edit-journal"
+      data-id="${escapeHtml(entry.id)}"
+      aria-label="${escapeHtml(entry.title || "Entrada de journal")}"
+    >
+      ${media}
+      <div class="journal-card-footer">
+        <span class="journal-result-icon" aria-label="${escapeHtml(statusLabel)}"><i data-lucide="${statusIcon}"></i></span>
+        <strong>${escapeHtml(formatJournalGalleryDate(entry.date))}</strong>
+        <span class="journal-gallery-pnl">${formatSignedMoney(pnl)}</span>
+      </div>
+      <div class="journal-card-details">
+        <div class="journal-card-details-head">
           <div>
-            <p class="journal-date">${formatDate(entry.date)}</p>
+            <span>${escapeHtml(statusLabel)}</span>
             <h3>${escapeHtml(entry.title || "Entrada sin titulo")}</h3>
           </div>
-          <div class="journal-card-stats">
-            <span class="journal-pnl ${pnlToneClass(pnl)}">${formatSignedMoney(pnl)}</span>
-            <span class="journal-score">Disciplina ${discipline}/5</span>
+          <div class="row-actions">
+            ${actionButton("edit-journal", entry.id, "Editar", "pencil")}
+            ${actionButton("delete-journal", entry.id, "Eliminar", "trash-2")}
           </div>
         </div>
-        <div class="journal-tags">
-          <span class="badge journal-result-${escapeHtml(entry.result)}">${escapeHtml(result)}</span>
-          <span class="badge journal-session">${escapeHtml(session)}</span>
+        <div class="journal-card-stats">
+          <span class="journal-pnl ${tone}">${formatSignedMoney(pnl)}</span>
+          <span class="journal-score">Disciplina ${discipline}/5</span>
           <span class="badge journal-emotion">${escapeHtml(emotion)}</span>
         </div>
         <p class="journal-meta">${escapeHtml(firm?.name || "Sin firm")} - ${escapeHtml(account?.name || "Sin cuenta concreta")}</p>
-        ${operation}
         ${errorTags}
         ${notes}
         ${lesson}
       </div>
-      <div class="row-actions">
-        ${actionButton("edit-journal", entry.id, "Editar", "pencil")}
-        ${actionButton("delete-journal", entry.id, "Eliminar", "trash-2")}
-      </div>
     </article>
   `;
+}
+
+function getJournalGalleryMediaHtml(operationUrl, title = "") {
+  const alt = escapeHtml(title || "Captura de la operacion");
+  if (isImageDataUrl(operationUrl)) {
+    return `
+      <a class="journal-gallery-media" href="${escapeHtml(operationUrl)}" target="_blank" rel="noreferrer" aria-label="Abrir captura">
+        <img src="${escapeHtml(operationUrl)}" alt="${alt}" />
+      </a>
+    `;
+  }
+  if (operationUrl) {
+    return `
+      <a class="journal-gallery-media is-placeholder" href="${escapeHtml(operationUrl)}" target="_blank" rel="noreferrer">
+        <i data-lucide="external-link"></i>
+        <span>Ver operacion</span>
+      </a>
+    `;
+  }
+  return `
+    <div class="journal-gallery-media is-placeholder">
+      <i data-lucide="image"></i>
+      <span>Sin captura</span>
+    </div>
+  `;
+}
+
+function formatJournalGalleryDate(value) {
+  if (!value) return "Sin fecha";
+  const date = parseLocalDate(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const formatted = new Intl.DateTimeFormat("es-ES", {
+    day: "numeric",
+    month: "long",
+    weekday: "long",
+    year: "numeric",
+  }).format(date);
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
 }
 
 function setTableVisible(tableBody, isVisible) {
@@ -3890,15 +4130,13 @@ function openJournalDialog(entry = null) {
   const firmId = entry?.firmId || account?.firmId || state.firms[0].id;
   els.journalId.value = entry?.id || "";
   els.journalDate.value = entry?.date || today();
-  els.journalSessionType.value = entry?.sessionType || "trading-day";
   els.journalFirm.value = firmId;
   fillAccountSelect(els.journalAccount, firmId, true, entry?.accountId || "");
   els.journalTitle.value = entry?.title || "";
-  els.journalResult.value = entry?.result || "neutral";
   els.journalEmotion.value = entry?.emotion || "focused";
   els.journalDiscipline.value = String(entry?.discipline || 3);
   els.journalPnl.value = entry ? Number(entry.pnl || 0) : "";
-  els.journalOperationUrl.value = entry?.operationUrl || "";
+  setJournalOperationMedia(entry?.operationUrl || "");
   renderJournalErrorChoices(entry?.errors || []);
   setJournalErrorFields(entry?.errors || []);
   els.journalNotes.value = entry?.notes || "";
@@ -4027,9 +4265,6 @@ function validateTransaction(transaction, selectedAccountId, account) {
 function validateJournalEntry(entry, selectedAccountId, account) {
   if (!isValidIsoDate(entry.date)) return markInvalid(els.journalDate, "La fecha de la entrada no es valida.");
   if (entry.date > today()) return markInvalid(els.journalDate, "La fecha de la entrada no puede ser futura.");
-  if (!journalSessionLabels[entry.sessionType]) {
-    return markInvalid(els.journalSessionType, "Selecciona un tipo de sesion valido.");
-  }
   if (!getFirm(entry.firmId)) return markInvalid(els.journalFirm, "Selecciona una firm valida.");
   if (selectedAccountId && !account) return markInvalid(els.journalAccount, "Selecciona una cuenta valida.");
   if (account && account.firmId !== entry.firmId) {
@@ -4037,20 +4272,23 @@ function validateJournalEntry(entry, selectedAccountId, account) {
   }
   if (!entry.title) return markInvalid(els.journalTitle, "Pon un titulo para la entrada.");
   if (entry.title.length < 3) return markInvalid(els.journalTitle, "El titulo es demasiado corto.");
-  if (!journalResultLabels[entry.result]) return markInvalid(els.journalResult, "Selecciona un resultado valido.");
   if (!journalEmotionLabels[entry.emotion]) return markInvalid(els.journalEmotion, "Selecciona un estado mental valido.");
   if (!Number.isInteger(entry.discipline) || entry.discipline < 1 || entry.discipline > 5) {
     return markInvalid(els.journalDiscipline, "La disciplina debe estar entre 1 y 5.");
   }
   if (!Number.isFinite(entry.pnl)) return markInvalid(els.journalPnl, "El P&L debe ser un numero valido.");
-  if (entry.operationUrl && !isValidUrl(entry.operationUrl)) {
-    return markInvalid(els.journalOperationUrl, "Pon un enlace valido para la operacion.");
+  if (entry.operationUrl && !isValidJournalOperationMedia(entry.operationUrl)) {
+    return markInvalid(els.journalOperationDropzone, "Pega una imagen valida para la operacion.");
   }
   if (entry.errors.some((error) => !getJournalErrorType(error))) {
     toast("Hay un error de journal no valido.");
     return false;
   }
   return true;
+}
+
+function isValidJournalOperationMedia(value) {
+  return isImageDataUrl(value) || isValidUrl(value);
 }
 
 async function saveFirmFromForm(event) {
@@ -4230,8 +4468,8 @@ async function saveJournalFromForm(event) {
     firmId: els.journalFirm.value,
     accountId: account?.id || "",
     title: els.journalTitle.value.trim(),
-    sessionType: els.journalSessionType.value,
-    result: els.journalResult.value,
+    sessionType: existing?.sessionType || "trading-day",
+    result: existing?.result || "neutral",
     emotion: els.journalEmotion.value,
     discipline: Number(els.journalDiscipline.value),
     pnl,
@@ -4332,11 +4570,12 @@ async function saveJournalErrorTypeFromForm(event) {
 }
 
 function handleTableAction(event) {
-  const button = event.target.closest("[data-action]");
-  if (!button) return;
-  const { action, id } = button.dataset;
+  const actionTarget = event.target.closest("[data-action]");
+  if (!actionTarget || !event.currentTarget.contains(actionTarget)) return;
+  event.preventDefault();
+  const { action, id } = actionTarget.dataset;
 
-  if (action === "select-journal-day") selectJournalDate(button.dataset.date);
+  if (action === "select-journal-day") selectJournalDate(actionTarget.dataset.date);
   if (action === "edit-firm") openFirmDialog(getFirm(id));
   if (action === "edit-account") openAccountDialog(getAccount(id));
   if (action === "edit-transaction") openTransactionDialog(getTransaction(id));
@@ -4348,6 +4587,24 @@ function handleTableAction(event) {
   if (action === "delete-account") requestDeleteAccount(id);
   if (action === "delete-transaction") requestDeleteTransaction(id);
   if (action === "delete-journal") requestDeleteJournalEntry(id);
+}
+
+function handleJournalCardKeyDown(event) {
+  if (!["Enter", " "].includes(event.key)) return;
+  if (event.target.closest("button, a, input, select, textarea")) return;
+  const card = event.target.closest(".journal-card[data-action='edit-journal']");
+  if (!card) return;
+  event.preventDefault();
+  openJournalDialog(getJournalEntry(card.dataset.id));
+}
+
+function clearJournalCardFocus() {
+  requestAnimationFrame(() => {
+    const activeElement = document.activeElement;
+    if (activeElement?.closest?.(".journal-card")) {
+      activeElement.blur();
+    }
+  });
 }
 
 function requestToggleJournalErrorType(id, active) {
@@ -4995,10 +5252,11 @@ function normalize(value) {
     .trim();
 }
 
-function normalizeJournalErrorTypes(value) {
-  const raw = Array.isArray(value) && value.length ? value : cloneDefaultJournalErrorTypes();
+function normalizeJournalErrorTypes(value, options = {}) {
+  const includeDefaults = options.includeDefaults !== false;
+  const raw = Array.isArray(value) ? value : [];
   const seen = new Set();
-  return raw
+  const normalized = raw
     .map((type, index) => ({
       id: String(type?.id || createId()),
       label: String(type?.label || "").trim(),
@@ -5014,6 +5272,19 @@ function normalizeJournalErrorTypes(value) {
       return true;
     })
     .sort((a, b) => a.position - b.position || a.label.localeCompare(b.label, "es"));
+
+  if (!includeDefaults) return normalized;
+
+  const existingIds = new Set(normalized.map((type) => type.id));
+  const missingDefaults = cloneDefaultJournalErrorTypes()
+    .filter((type) => !existingIds.has(type.id))
+    .map((type) => ({
+      ...type,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    }));
+
+  return [...normalized, ...missingDefaults].sort((a, b) => a.position - b.position || a.label.localeCompare(b.label, "es"));
 }
 
 function getJournalErrorTypes(options = {}) {
