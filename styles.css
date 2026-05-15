@@ -2529,7 +2529,7 @@ tbody tr:hover {
 
 .journal-card-footer {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   min-height: 40px;
@@ -2539,33 +2539,6 @@ tbody tr:hover {
 
 :root[data-theme="light"] .journal-card-footer {
   background: color-mix(in srgb, var(--surface) 72%, #000 8%);
-}
-
-.journal-result-icon {
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: var(--radius-xs);
-  color: #ffffff;
-}
-
-.journal-card.positive .journal-result-icon {
-  background: var(--green);
-}
-
-.journal-card.negative .journal-result-icon {
-  background: var(--red-strong);
-}
-
-.journal-card.neutral .journal-result-icon {
-  background: var(--muted);
-}
-
-.journal-result-icon svg {
-  width: 13px;
-  height: 13px;
-  stroke-width: 3;
 }
 
 .journal-card-footer strong {
@@ -2586,6 +2559,26 @@ tbody tr:hover {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   white-space: nowrap;
+}
+
+.journal-gallery-pnl.positive {
+  color: var(--green-strong);
+}
+
+.journal-gallery-pnl.negative {
+  color: var(--red-strong);
+}
+
+.journal-gallery-pnl.neutral {
+  color: var(--muted-strong);
+}
+
+:root[data-theme="dark"] .journal-gallery-pnl.positive {
+  color: var(--green);
+}
+
+:root[data-theme="dark"] .journal-gallery-pnl.negative {
+  color: var(--red);
 }
 
 .journal-card-details {

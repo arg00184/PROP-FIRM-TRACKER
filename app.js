@@ -3218,7 +3218,6 @@ function journalCardHtml(entry) {
   const discipline = clamp(Math.round(Number(entry.discipline || 3)), 1, 5);
   const pnl = Number(entry.pnl || 0);
   const tone = pnlToneClass(pnl);
-  const statusIcon = pnl > 0 ? "check" : pnl < 0 ? "x" : "minus";
   const statusLabel = pnl > 0 ? "Ganancia" : pnl < 0 ? "Perdida" : "Break even";
   const errors = sanitizeJournalErrors(entry.errors);
   const notes = entry.notes
@@ -3246,9 +3245,8 @@ function journalCardHtml(entry) {
     >
       ${media}
       <div class="journal-card-footer">
-        <span class="journal-result-icon" aria-label="${escapeHtml(statusLabel)}"><i data-lucide="${statusIcon}"></i></span>
         <strong>${escapeHtml(formatJournalGalleryDate(entry.date))}</strong>
-        <span class="journal-gallery-pnl">${formatSignedMoney(pnl)}</span>
+        <span class="journal-gallery-pnl ${tone}">${formatSignedMoney(pnl)}</span>
       </div>
       <div class="journal-card-details">
         <div class="journal-card-details-head">
@@ -3304,13 +3302,10 @@ function formatJournalGalleryDate(value) {
   if (!value) return "Sin fecha";
   const date = parseLocalDate(value);
   if (Number.isNaN(date.getTime())) return value;
-  const formatted = new Intl.DateTimeFormat("es-ES", {
-    day: "numeric",
-    month: "long",
-    weekday: "long",
-    year: "numeric",
-  }).format(date);
-  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+  const weekday = new Intl.DateTimeFormat("es-ES", { weekday: "long" }).format(date);
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}, ${day}/${month}/${date.getFullYear()}`;
 }
 
 function setTableVisible(tableBody, isVisible) {
