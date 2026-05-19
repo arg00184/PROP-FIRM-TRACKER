@@ -6,7 +6,8 @@ create table if not exists public.journal_entries (
   firm_id uuid references public.firms(id) on delete set null,
   account_id uuid references public.accounts(id) on delete set null,
   date date not null,
-  title text not null check (length(trim(title)) >= 3),
+  title text not null check (length(trim(title)) >= 1),
+  trade_direction text check (trade_direction in ('long', 'short')),
   session_type text not null check (
     session_type in ('trading-day', 'evaluation', 'funded', 'payout-day', 'news-day', 'review', 'other')
   ),
@@ -23,6 +24,21 @@ create table if not exists public.journal_entries (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.journal_entries
+  drop constraint if exists journal_entries_title_check;
+
+alter table public.journal_entries
+  add constraint journal_entries_title_check check (length(trim(title)) >= 1);
+
+alter table public.journal_entries
+  add column if not exists trade_direction text;
+
+alter table public.journal_entries
+  drop constraint if exists journal_entries_trade_direction_check;
+
+alter table public.journal_entries
+  add constraint journal_entries_trade_direction_check check (trade_direction in ('long', 'short'));
 
 alter table public.journal_entries
   add column if not exists pnl numeric(12, 2) not null default 0;

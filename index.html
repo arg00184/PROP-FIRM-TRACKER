@@ -129,6 +129,9 @@
             </div>
           </div>
           <div class="topbar-actions">
+            <button class="theme-toggle" id="dashboardPrivacyToggleButton" type="button" aria-label="Ocultar datos del dashboard" title="Ocultar datos">
+              <i data-lucide="eye"></i>
+            </button>
             <button class="theme-toggle" id="themeToggleButton" type="button" aria-label="Cambiar a modo oscuro" title="Cambiar tema">
               <i data-lucide="moon"></i>
             </button>
@@ -388,7 +391,7 @@
               </label>
               <label>
                 Buscar
-                <input id="accountSearch" type="search" placeholder="Nombre, tamano..." />
+                <input id="accountSearch" type="search" placeholder="Nombre, tamaño..." />
               </label>
             </div>
             <div class="table-wrap">
@@ -397,7 +400,7 @@
                   <tr>
                     <th>Cuenta</th>
                     <th>Firm</th>
-                    <th>Tamano</th>
+                    <th>Tamaño</th>
                     <th>Estado</th>
                     <th>Comprada</th>
                     <th>Gastado</th>
@@ -477,22 +480,12 @@
             <div class="panel-header">
               <div>
                 <h2 id="journalPanelTitle">Journal</h2>
-                <p id="journalPanelSubtitle">Dashboard, sesiones y aprendizaje</p>
+                <p id="journalPanelSubtitle">Dashboard, operaciones y notas</p>
               </div>
               <button class="primary-button section-cta" id="addJournalButtonInline">
                 <i data-lucide="plus"></i>
                 <span>Nueva entrada</span>
               </button>
-            </div>
-            <div class="filters-row journal-scope-filters" aria-label="Filtros del journal">
-              <label>
-                Firm
-                <select id="journalFirmFilter"></select>
-              </label>
-              <label>
-                Cuenta
-                <select id="journalAccountFilter"></select>
-              </label>
             </div>
             <div class="journal-app-shell">
               <div class="journal-dashboard">
@@ -502,6 +495,10 @@
                     <h3>Dashboard</h3>
                     <p id="journalCalendarSummary">P&L, disciplina, errores y calendario desde tus entradas.</p>
                   </div>
+                  <label class="journal-dashboard-filter">
+                    Cuenta
+                    <select id="journalAccountFilter"></select>
+                  </label>
                 </div>
                 <article class="journal-account-overview" id="journalAccountOverview" hidden>
                   <div class="journal-account-overview-head">
@@ -530,7 +527,7 @@
                   <article class="journal-chart-block journal-pnl-block">
                     <div class="journal-chart-head">
                       <div>
-                        <h4>P&L total</h4>
+                        <h4>Balance</h4>
                         <p id="journalPnlSummary">Resultado acumulado del journal.</p>
                       </div>
                     </div>
@@ -545,6 +542,18 @@
                       <p class="empty-chart" id="journalPnlChartEmpty">Sin P&L</p>
                     </div>
                   </article>
+                  <div class="journal-kpi-stack">
+                    <article class="journal-performance-card">
+                      <span>Winrate</span>
+                      <strong class="neutral" id="journalWinrateValue">-</strong>
+                      <small id="journalWinrateHint">Sin operaciones cerradas</small>
+                    </article>
+                    <article class="journal-performance-card">
+                      <span>Profit factor</span>
+                      <strong class="neutral" id="journalProfitFactorValue">-</strong>
+                      <small id="journalProfitFactorHint">Ganancias / perdidas</small>
+                    </article>
+                  </div>
                   <article class="journal-chart-block journal-errors-block">
                     <div class="journal-chart-head">
                       <div>
@@ -590,14 +599,21 @@
                       <h4 id="journalCalendarMonth">Mes actual</h4>
                       <p>P&L diario y cierre semanal.</p>
                     </div>
-                    <div class="journal-calendar-actions">
-                      <button class="icon-button" type="button" id="journalCalendarPrev" aria-label="Mes anterior">
-                        <i data-lucide="chevron-left"></i>
-                      </button>
-                      <button class="secondary-button compact-button" type="button" id="journalCalendarToday">Hoy</button>
-                      <button class="icon-button" type="button" id="journalCalendarNext" aria-label="Mes siguiente">
-                        <i data-lucide="chevron-right"></i>
-                      </button>
+                    <div class="journal-calendar-tools">
+                      <div class="journal-month-total">
+                        <span>Month total</span>
+                        <span aria-hidden="true">:</span>
+                        <strong class="neutral" id="journalMonthTotal">0,00 €</strong>
+                      </div>
+                      <div class="journal-calendar-actions">
+                        <button class="icon-button" type="button" id="journalCalendarPrev" aria-label="Mes anterior">
+                          <i data-lucide="chevron-left"></i>
+                        </button>
+                        <button class="secondary-button compact-button" type="button" id="journalCalendarToday">Hoy</button>
+                        <button class="icon-button" type="button" id="journalCalendarNext" aria-label="Mes siguiente">
+                          <i data-lucide="chevron-right"></i>
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <div class="journal-calendar-wrap">
@@ -610,7 +626,7 @@
               <div class="journal-view-heading">
                 <div>
                   <h3>Entradas</h3>
-                  <p>Busca sesiones, decisiones y aprendizajes.</p>
+                  <p>Busca operaciones, decisiones y notas.</p>
                 </div>
                 <div class="journal-selected-date" id="journalSelectedDateLabel" hidden></div>
                 <button class="ghost-button compact-button" type="button" id="journalClearDateButton" hidden>
@@ -620,18 +636,22 @@
               </div>
               <div class="filters-row journal-filters">
                 <label>
+                  Cuenta
+                  <select id="journalEntriesAccountFilter"></select>
+                </label>
+                <label>
                   Periodo
                   <select id="journalPeriodFilter">
                     <option value="all">Todo</option>
                     <option value="current-month">Mes actual</option>
                     <option value="last-30">Ultimos 30 dias</option>
                     <option value="last-90">Ultimos 90 dias</option>
-                    <option value="year">Este ano</option>
+                    <option value="year">Este año</option>
                   </select>
                 </label>
                 <label>
                   Buscar
-                  <input id="journalSearch" type="search" placeholder="Titulo, notas, aprendizaje..." />
+                  <input id="journalSearch" type="search" placeholder="Activo, dirección, notas..." />
                 </label>
               </div>
               <div class="journal-list" id="journalEntriesList"></div>
@@ -705,7 +725,7 @@
         </label>
         <div class="form-grid">
           <label>
-            Tamano
+            Tamaño
             <input id="accountSize" type="text" placeholder="50K, 100K, 200K..." />
           </label>
           <label>
@@ -815,10 +835,38 @@
             </select>
           </label>
         </div>
-        <label>
-          Titulo
-          <input id="journalTitle" type="text" required placeholder="Ej. Londres, FOMC, trade de continuacion..." />
-        </label>
+        <div class="form-grid">
+          <label>
+            Activo
+            <input id="journalTitle" type="text" required list="journalAssetOptions" maxlength="20" placeholder="Ej. MNQ, NQ, ES, MES..." />
+            <datalist id="journalAssetOptions">
+              <option value="MNQ"></option>
+              <option value="NQ"></option>
+              <option value="MES"></option>
+              <option value="ES"></option>
+              <option value="MYM"></option>
+              <option value="YM"></option>
+              <option value="M2K"></option>
+              <option value="RTY"></option>
+              <option value="MCL"></option>
+              <option value="CL"></option>
+              <option value="GC"></option>
+              <option value="MGC"></option>
+              <option value="EURUSD"></option>
+              <option value="GBPUSD"></option>
+              <option value="XAUUSD"></option>
+              <option value="BTCUSD"></option>
+            </datalist>
+          </label>
+          <label>
+            Dirección
+            <select id="journalDirection" required>
+              <option value="">Selecciona</option>
+              <option value="long">Long</option>
+              <option value="short">Short</option>
+            </select>
+          </label>
+        </div>
         <div class="form-grid">
           <label>
             Disciplina
@@ -870,15 +918,75 @@
           Notas
           <textarea id="journalNotes" rows="4" placeholder="Que paso, que setups tomaste, como gestionaste el riesgo..."></textarea>
         </label>
-        <label>
-          Aprendizaje
-          <textarea id="journalLesson" rows="3" placeholder="Que repites, que corriges o que evitas en la proxima sesion"></textarea>
-        </label>
         <div class="modal-actions">
           <button class="ghost-button" type="button" data-close-dialog="journalDialog">Cancelar</button>
           <button class="primary-button" type="submit">Guardar</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog class="modal" id="journalDetailDialog">
+      <div class="modal-card journal-detail-card">
+        <div class="modal-header journal-detail-header">
+          <div class="journal-detail-title">
+            <span class="journal-detail-kicker" id="journalDetailDate">Entrada</span>
+            <h2 id="journalDetailTitle">Detalle de entrada</h2>
+          </div>
+          <div class="journal-detail-actions">
+            <button class="icon-button" type="button" id="journalDetailEditButton" aria-label="Editar entrada">
+              <i data-lucide="pencil"></i>
+            </button>
+            <button class="icon-button journal-detail-delete" type="button" id="journalDetailDeleteButton" aria-label="Eliminar entrada">
+              <i data-lucide="trash-2"></i>
+            </button>
+            <button class="icon-button" type="button" data-close-dialog="journalDetailDialog" aria-label="Cerrar">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+        </div>
+        <div class="journal-detail-summary">
+          <div class="journal-detail-metric">
+            <span>P&L</span>
+            <strong class="journal-pnl neutral journal-detail-pnl" id="journalDetailPnl">0,00 €</strong>
+          </div>
+          <div class="journal-detail-metric">
+            <span>Dirección</span>
+            <strong class="journal-detail-direction" id="journalDetailDirection">Sin dirección</strong>
+          </div>
+          <div class="journal-detail-metric">
+            <span>Errores</span>
+            <div class="journal-error-tags" id="journalDetailErrors"></div>
+          </div>
+        </div>
+        <div class="journal-detail-media-shell" id="journalDetailMediaShell" hidden>
+          <button class="journal-detail-media-button" type="button" id="journalDetailMediaButton" aria-label="Ampliar captura" hidden>
+            <img id="journalDetailImage" alt="Captura de la operacion" />
+            <span>
+              <i data-lucide="zoom-in"></i>
+              Ampliar captura
+            </span>
+          </button>
+          <a class="journal-operation-link journal-detail-link" id="journalDetailLink" href="#" target="_blank" rel="noreferrer" hidden>
+            <i data-lucide="external-link"></i>
+            <span>Ver operacion</span>
+          </a>
+        </div>
+        <div class="journal-detail-copy">
+          <section class="journal-detail-section">
+            <span>Notas</span>
+            <p class="journal-text" id="journalDetailNotes">Sin notas.</p>
+          </section>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="modal" id="journalImageZoomDialog">
+      <div class="journal-image-zoom-card">
+        <button class="icon-button journal-image-zoom-close" type="button" data-close-dialog="journalImageZoomDialog" aria-label="Cerrar">
+          <i data-lucide="x"></i>
+        </button>
+        <img id="journalImageZoom" alt="Captura ampliada de la operacion" />
+      </div>
     </dialog>
 
     <dialog class="modal" id="journalErrorManagerDialog">
